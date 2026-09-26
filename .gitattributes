@@ -1,0 +1,8 @@
+# Keep LF for shell scripts (shebang breaks with CRLF) and V sources;
+# let images stay untouched.
+* text=auto
+*.sh text eol=lf
+*.v text eol=lf
+*.c.v text eol=lf
+*.h text eol=lf
+*.png binary

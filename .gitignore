@@ -1,0 +1,15 @@
+# V build outputs (root-level binaries only — no trailing slash patterns
+# that could swallow source dirs like examples/hello/)
+/vails
+/vails.exe
+/hello
+/hello.exe
+*.exe
+.vmodules/
+.v/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

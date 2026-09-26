@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Hello Vails</title>
+</head>
+<body>
+<h1>Hello from Vails</h1>
+<p id="status">backend: not connected</p>
+<button id="ping">ping backend</button>
+<script>
+(function () {
+  var s = document.getElementById("status");
+  var b = document.getElementById("ping");
+  if (!window.vails) {
+    s.textContent = "preview mode: run inside Vails window";
+    b.disabled = true;
+    return;
+  }
+  b.addEventListener("click", function () {
+    window.vails.call("ping", "").then(function (r) {
+      s.textContent = "backend says: " + r;
+    }).catch(function (e) {
+      s.textContent = "error: " + e.message;
+    });
+  });
+  window.vails.onEvent("ready", function (d) {
+    s.textContent = "event: " + d;
+  });
+})();
+</script>
+</body>
+</html>
