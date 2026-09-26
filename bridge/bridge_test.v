@@ -1,5 +1,7 @@
 module bridge
 
+import capabilities
+
 fn echo_fn(params string) !string {
 	return params
 }
@@ -52,4 +54,48 @@ fn test_router_duplicate_fails() {
 	mut failed := false
 	r.register('echo', echo_fn) or { failed = true }
 	assert failed
+}
+
+fn allow_echo_registry() capabilities.Registry {
+	mut reg := capabilities.new_registry()
+	reg.grant(capabilities.Capability{
+		id:       'main-echo'
+		windows:  ['main']
+		commands: ['echo']
+	})
+	return reg
+}
+
+fn test_call_from_allows_granted() {
+	mut r := new_router()
+	r.register('echo', echo_fn)!
+	resp := r.call_from('main', '1', 'echo', 'hi', allow_echo_registry())
+	assert resp.err == ''
+	assert resp.result == 'hi'
+}
+
+fn test_call_from_denies_wrong_window() {
+	mut r := new_router()
+	r.register('echo', echo_fn)!
+	resp := r.call_from('other', '2', 'echo', 'hi', allow_echo_registry())
+	assert resp.id == '2'
+	assert resp.err.contains('forbidden:')
+	assert resp.err.contains('echo')
+	assert !resp.err.contains('unknown method')
+	assert resp.result == ''
+}
+
+fn test_call_from_denies_ungranted_method() {
+	mut r := new_router()
+	r.register('echo', echo_fn)!
+	resp := r.call_from('main', '3', 'secret', '', allow_echo_registry())
+	assert resp.err.contains('forbidden:')
+	assert !resp.err.contains('unknown method')
+}
+
+fn test_call_from_empty_registry_denies() {
+	mut r := new_router()
+	r.register('echo', echo_fn)!
+	resp := r.call_from('main', '4', 'echo', 'hi', capabilities.new_registry())
+	assert resp.err.contains('forbidden:')
 }

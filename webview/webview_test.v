@@ -2,11 +2,21 @@ module webview
 
 fn test_config_defaults() {
 	cfg := Config{}
+	assert cfg.label == 'main'
 	assert cfg.title == 'Vails App'
 	assert cfg.width == 1024
 	assert cfg.height == 768
 	assert cfg.html == ''
 	assert cfg.url == ''
+}
+
+fn test_config_label_is_security_identity() {
+	cfg := Config{
+		label: 'settings'
+		title: 'Settings'
+	}
+	assert cfg.label != cfg.title
+	assert cfg.label == 'settings'
 }
 
 fn test_validate_ok() {

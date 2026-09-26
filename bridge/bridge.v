@@ -3,6 +3,7 @@
 // JSON strings so this module needs no codegen and no reflect package.
 module bridge
 
+import capabilities
 import json2
 
 pub struct Request {
@@ -37,6 +38,20 @@ pub fn (mut r Router) register(name string, h MethodHandler) ! {
 		return error('method already registered: ' + name)
 	}
 	r.methods[name] = h
+}
+
+// call_from is the capability-checked dispatch (T1). The window_label is
+// the webview.Config.label of the calling window. Denied calls return
+// 'forbidden: …' (never 'unknown method') so ungranted method names do
+// not leak. call() stays as the unchecked compat path.
+pub fn (r Router) call_from(window_label string, id string, method string, params string, reg capabilities.Registry) Response {
+	if !reg.is_allowed(window_label, method) {
+		return Response{
+			id:  id
+			err: 'forbidden: ' + method + ' is not allowed for window "' + window_label + '"'
+		}
+	}
+	return r.call(id, method, params)
 }
 
 // call dispatches one request and never propagates errors: failures land in

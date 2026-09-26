@@ -5,6 +5,7 @@
 // Everything here is OS-agnostic and unit-tested on any platform.
 module bridge
 
+import capabilities
 import jsesc
 import json2
 
@@ -22,6 +23,18 @@ pub fn (r Router) handle_message(raw string) string {
 		})
 	}
 	return encode_response(r.call(req.id, req.method, req.params))
+}
+
+// handle_message_from is the capability-checked entry point (T1).
+// The native side passes the calling window's Config.label. Denied or
+// malformed requests still return well-formed Response JSON, never error.
+pub fn (r Router) handle_message_from(raw string, window_label string, reg capabilities.Registry) string {
+	req := decode_request(unwrap_args(raw)) or {
+		return encode_response(Response{
+			err: 'bad request: ' + err.msg()
+		})
+	}
+	return encode_response(r.call_from(window_label, req.id, req.method, req.params, reg))
 }
 
 // unwrap_args extracts the single string element when raw is a one-element

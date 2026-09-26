@@ -42,7 +42,7 @@ model (full), low-cost/high-impact ideas only. Deferred to post-desktop:
 signed updater, sidecar binaries, mobile, store/SQL/Stronghold, WebDriver
 engine, iframe isolation pattern.
 
-- [ ] **T1 — Capabilities (first; everything else builds on it)**:
+- [x] **T1 — Capabilities (first; everything else builds on it)** (done 2026-09-26, ADR-0007):
   new `capabilities/` module: `Capability{id, windows []string,
   commands []string, asset_roots []string, platforms []string}` +
   `Registry.is_allowed(window_label, command)`. `webview.Config` gains a

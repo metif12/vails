@@ -1,5 +1,7 @@
 module bridge
 
+import capabilities
+
 fn transport_echo(params string) !string {
 	return params
 }
@@ -74,6 +76,35 @@ fn test_resolve_js_escapes_quote() {
 	// raw single quote must not leak into the JS string literal
 	assert !snippet.contains("it's")
 	assert snippet.contains("\\'")
+}
+
+fn test_handle_message_from_allows_granted() {
+	mut r := new_router()
+	r.register('echo', transport_echo)!
+	mut reg := capabilities.new_registry()
+	reg.grant(capabilities.Capability{
+		id:       't1'
+		windows:  ['main']
+		commands: ['echo']
+	})
+	resp_raw := r.handle_message_from(encode_request('11', 'echo', 'ping'), 'main', reg)
+	assert resp_raw.contains('"id":"11"')
+	assert resp_raw.contains('"result":"ping"')
+}
+
+fn test_handle_message_from_denies() {
+	mut r := new_router()
+	r.register('echo', transport_echo)!
+	mut reg := capabilities.new_registry()
+	reg.grant(capabilities.Capability{
+		id:       't1'
+		windows:  ['main']
+		commands: ['echo']
+	})
+	resp_raw := r.handle_message_from(encode_request('12', 'echo', 'ping'), 'other', reg)
+	assert resp_raw.contains('"id":"12"')
+	assert resp_raw.contains('forbidden:')
+	assert !resp_raw.contains('unknown method')
 }
 
 fn test_runtime_js_markers() {

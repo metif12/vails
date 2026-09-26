@@ -40,6 +40,16 @@ to stay consistent across sessions.
 - **Binding spec (`generator.MethodSpec`)**: static description of one
   bound method used to emit TypeScript declarations (`generate_dts`).
   Hand-written specs for now; compile-time auto-derivation is Phase 5+.
+- **Capability (`capabilities.Registry`)**: Tauri-style allowlist (T1).
+  `Capability{id, windows, commands, asset_roots, platforms}` granted via
+  `grant`; `is_allowed(window_label, command)` gates dispatch
+  (`is_allowed_on` is the testable core with injected OS). Empty
+  `windows`/`platforms` = all, empty `commands` = none, empty registry =
+  deny all. `webview.Config.label` (default `'main'`, distinct from title)
+  is the window's security identity; `bridge.Router.call_from` /
+  `handle_message_from` return `forbidden: …` (not `unknown method`) on
+  deny; `assets.Server.allowed_roots` (empty = legacy root-only) scopes
+  file reads. See ADR-0007.
 
 ## Non-goals (explicit)
 

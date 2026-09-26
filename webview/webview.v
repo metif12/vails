@@ -6,6 +6,9 @@ import bridge
 
 pub struct Config {
 pub mut:
+	// label identifies the window for capability checks (Tauri-style).
+	// Distinct from title: title is shown, label is the security identity.
+	label  string = 'main'
 	title  string = 'Vails App'
 	width  int    = 1024
 	height int    = 768
