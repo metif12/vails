@@ -28,3 +28,25 @@ fn test_register_duplicate_fails() {
 	assert failed
 	assert app.services.len == 1
 }
+
+fn test_managed_state_roundtrip() {
+	mut app := new(AppOptions{})
+	assert !app.has_state('theme')
+	app.set_state('theme', '"dark"')!
+	assert app.has_state('theme')
+	assert app.get_state('theme')! == '"dark"'
+}
+
+fn test_managed_state_missing_fails() {
+	app := new(AppOptions{})
+	mut failed := false
+	app.get_state('nope') or { failed = true }
+	assert failed
+}
+
+fn test_managed_state_rejects_empty_key() {
+	mut app := new(AppOptions{})
+	mut failed := false
+	app.set_state('', '{}') or { failed = true }
+	assert failed
+}
