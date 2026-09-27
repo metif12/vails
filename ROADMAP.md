@@ -2,9 +2,15 @@
 
  checkboxes = state. Move exactly one phase at a time (see AGENTS.md §3).
 
-Current position (2026-09-27): Phases 0–4 + T1/T6/T2/T3/T4/T7/M0 done.
-Next is Phase 5 services (S1 `dialog` first), then T5 plugin manifests.
-Phase 6–7, the M1-M4, C- and E-tracks below are planned, not started.
+Current position (2026-09-27): Phases 0–4 + T1/T6/T2/T3/T4/T7/M0 done, and
+Phase 5 S1 wave 1 + T5 done (ADR-0014): the `webview.Ctx` seam (V->JS emit
++ parent handle, T7 CSP now wired natively), the service manifest/install
+model, the `dialog` service (Windows native, E2E-proofed) and `os-info`,
+`vails dts`, and the `examples/dialog` E2E proof.
+Next is Phase 5 S1 wave 2: `notification` → `clipboard` (native half) →
+`menu` → `tray` → `opener`. Linux dialog backends wait for a Linux
+toolchain (Phase 5b). Phase 6–7, the M1-M4, C- and E-tracks below are
+planned, not started.
 
 - [x] **Phase 0 — Scaffold** (this repo): `v.mod`, module skeleton,
   `AGENTS.md`/`CONTEXT.md`/`ROADMAP.md`, ADRs, `examples/hello`,
@@ -35,24 +41,41 @@ Phase 6–7, the M1-M4, C- and E-tracks below are planned, not started.
   with frontend grant + `frontend/` with ping demo); `doctor` checks
   `v --version`, toolchain, `vails.json`, `asset_root`; `build` sets
   `VMODULES` to the vails root (`VAILS_HOME` or walk-up).
-- [ ] **Phase 5 — Services** (full catalog below; one PR per service +
-  Linux manual test; each: `services/<name>.v` seam + `_test.v` +
-  capability + ADR line; T5 plugin manifests align here):
-  - S1 core (desktop first): `dialog` → `notification` → `menu` →
-    `tray` (StatusNotifier/AppIndicator — separate from `menu`) →
-    `clipboard` (full: read/write + monitor event) → `opener`
-    (open file/URL in external app) → `os-info` → `window-state` /
-    `positioner` (persist size/position). Cf. `v3/pkg/services`.
-  - S2 system (after S1): `single-instance` → `autostart` →
+- [ ] **Phase 5 — Services** (S1 wave 1 shipped 2026-09-27, ADR-0014;
+   full catalog below. Each next wave: `services/<name>.v` seam +
+   `_test.v` + capability + ADR line, one PR per service + manual test):
+  - [x] S1 core wave 1 (done, ADR-0014): `webview.Ctx` seam (V->JS
+    `emit` + native parent handle, closing the Phase 2 event-delivery
+    leftover, and wiring the T7 CSP onto the native path), the service
+    manifest + `services.install` model (T5), **`dialog`** (Windows
+    native: Common Item Dialog + MessageBoxW behind a C shim; E2E proof
+    in `tests/e2e_windows/dialog.png`; Linux is an explicit stub until a
+    Linux toolchain exists), **`os-info`** (pure-V reference service,
+    pulled forward from this list on purpose), `vails dts` (grant-driven
+    `.d.ts` + per-service JS snippets) and the `examples/dialog` proof.
+  - [ ] S1 core wave 2: `notification` → `clipboard` (native half, the
+    command surface already exists) → `menu` → `tray`
+    (StatusNotifier/AppIndicator — separate from `menu`) → `opener`
+    (open file/URL in external app) → `window-state` / `positioner`
+    (persist size/position). Cf. `v3/pkg/services`. `tray` needs the
+    HWND that `webview.Ctx.parent` now provides.
+  - [ ] S2 system (after S1): `single-instance` → `autostart` →
     `global-shortcut` (risk: Wayland limits) → `keychain`
     (cf. `v3/internal/keychain`) → `store` (persisted KV) →
     `screencapture` (per ADR-0009 B) → `scoped fs` (last, riskiest,
     capability-locked).
-  - S3 mobile (feeds M2): `haptics` (= `vibrate`), `biometric`,
+  - [ ] S3 mobile (feeds M2): `haptics` (= `vibrate`), `biometric`,
     `geolocation`; `barcode-scanner` / `nfc` optional-late.
   - Out of scope (post-desktop, unchanged): signed `updater`,
     `sidecar` binaries, unrestricted `shell` / `process`, `sql` /
     `stronghold`, WebDriver engine, BT/serial/printer (community-level).
+- [ ] **Phase 5b — Linux service backends** (needs a Linux toolchain:
+  WSL Ubuntu with V built from source. Not this machine, so nothing here
+  was written blind): `dialog` (GtkFileChooserDialog + `gtk_dialog_run`
+  on the main loop), then `clipboard` (GTK clipboard or xclip),
+  `notification` (libnotify / `notify-send`), `opener`
+  (`xdg-open`). Manual checklist in `tests/e2e_linux/README.md`; the
+  rest of the catalog follows the same pure-V-first rule.
 - [ ] **Phase 6 — Cross-platform**: Windows first (WebView2/COM behind
   a C wrapper — V has no COM projection; highest risk), then macOS
   (WKWebView/ObjC). Freeze `application/` + `bridge/` API before starting.
@@ -105,12 +128,19 @@ has its own track below.)
   `application.App` (`set_state`/`get_state`/`has_state`, handlers
   capture `&app`). Threading follows ADR-0010 (main-thread access,
   `spawn` workers reply as events).
-- [ ] **T5 — Services as plugins (aligns with Phase 5)**: each service
-  gets a small manifest — name, version, required capabilities, its own
-  JS snippet (no monolithic runtime). `generator` emits `.d.ts` from the
-  manifest. Order follows the Phase 5 catalog: S1 core first (`dialog` →
-  `notification` → …) then S2 (`single-instance` → … → scoped `fs` last,
-  locked by capabilities).
+- [x] **T5 — Services as plugins** (done 2026-09-27, ADR-0014): each
+  service is described by a manifest (`services/manifest.v`:
+  `Service{name, version, summary, commands, ts_types}`) and registered
+  through one path (`services/install.v`) that refuses undeclared,
+  missing, foreign-namespace or duplicate commands. Each service ships its
+  own JS snippet (`Service.js_snippet()` — no monolithic runtime), and the
+  `.d.ts` is generated from the same manifest, grant-driven via
+  `vails dts` (a frontend can only type-check what `vails.json` grants).
+  `services.manifests()` is the catalog; `os_info.get` and `dialog.*` are
+  the first entries. Order for the rest follows the Phase 5 catalog: S1
+  core (`notification` → `clipboard` → `menu` → `tray` → `opener` → ...)
+  then S2 (`single-instance` → ... → scoped `fs` last, locked by
+  capabilities).
 - [x] **T6 — `vails.json` config (aligns with Phase 4 CLI)** (done 2026-09-26, ADR-0008):
   minimal Tauri-`tauri.conf.json` equivalent: windows list (label/title/size),
   enabled capabilities, asset roots, bundle settings (icon, name,
@@ -122,7 +152,10 @@ has its own track below.)
   documented and tested as the secure mode (test fails when hello's meta
   drifts from `default_csp()`).
 
-Execution order: T1 → T6 → T2 → T3 → T4 → Phase 3 → Phase 4 → T5 (all done except T5; next: Phase 5 S1 `dialog`, then T5). Estimate: ~3 focused weeks.
+Execution order: T1 → T6 → T2 → T3 → T4 → Phase 3 → Phase 4 → Phase 5
+S1 wave 1 + T5 (all done; the V->JS event-delivery leftover of Phase 2
+closed with `webview.Ctx`). Next: Phase 5 S1 wave 2, then Phase 5b (Linux
+service backends). Estimate: ~3 focused weeks.
 Each item: code + tests on both OSes + short ADR + ROADMAP checkbox.
 
 ## Mobile track (both platforms, plan-only until SDK/macOS exist; ADR-0006)
@@ -208,7 +241,11 @@ light+dark via `prefers-color-scheme`, LTR English. Each example:
 (runs outside a Vails window, like hello) + e2e README lines.
 No example starts before the service it needs.
 
-- [ ] **E0 — Conventions** (once, before any app example)
+- [x] **E0 — Conventions** (done 2026-09-27, ADR-0014): the bar is
+  carried by `examples/dialog` — system type scale, 4px spacing rhythm,
+  `focus-visible` on every control, light+dark via
+  `prefers-color-scheme`, LTR English, one column, and a preview
+  fallback that degrades visibly outside a Vails window.
 - [ ] **E1 — todo** (after T4; later persisted via `store`)
 - [ ] **E2 — pomodoro** (after `notification` S1; live tick via T3 channel)
 - [ ] **E3 — clipboard-notes** (after full `clipboard`)

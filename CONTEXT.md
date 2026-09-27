@@ -12,6 +12,19 @@ to stay consistent across sessions.
   webview. The **only** module allowed to contain C calls. Every other
   module talks to it through plain V structs/strings.
   `Config.validate()` rejects empty title / non-positive size pre-native.
+  `Config.document()` returns the HTML to load with the default CSP
+  injected (both backends use it; empty in URL mode). `Config.on_ready`
+  hands the app the window's `Ctx` after the native window exists and
+  before the event loop starts (services install there). See ADR-0014.
+- **Window handle (`webview.Ctx`)**: the window-scoped runtime handle a
+  service talks to: `emit(event, data)` (V -> JS via the `events.to_js`
+  snippet), `run_js`, and `parent` (the native window handle, HWND /
+  GdkWindow, used to parent native UI). Pure-V: the backends only fill
+  `eval_fn` + `parent`, so it is unit-testable with a fake sink.
+  `emit` from a spawned worker is the answer to ADR-0010's
+  "heavy work via spawn + result as event"; on Windows the eval must
+  happen on the webview thread, so push it from a handler, not from a
+  worker. See ADR-0014.
 - **Bridge (`bridge.Router`)**: maps a JS-initiated call to a V function.
   Wire format is JSON: `Request{id, method, params}` → `Response{id, result,
   err}` where `params`/`result` are raw JSON strings. No reflection:
@@ -95,9 +108,40 @@ to stay consistent across sessions.
 - **Service**: a named native capability (`clipboard`, `dialog`, …)
   registered on the `App` by string name. Implementations live in
   `services/` and may be OS-gated.
+- **Service manifest (`services.Service`, T5)**: the data description of a
+  service — `Service{name, version, summary, commands, ts_types}` with
+  `Command{name, params, result, blocking, summary}`. A service's commands
+  ARE its capability names (`dialog.open`), so grants and manifests
+  cannot drift apart. `js_snippet()` emits the per-service frontend glue
+  (no monolithic runtime), `ts_types` the TypeScript shapes the generated
+  `.d.ts` needs. `services.manifests()` is the one catalog; resolution
+  helpers take a list (`find_in`/`service_in`/`lookup_in`/`select_in`) so
+  they are testable without the catalog. See ADR-0014.
+- **Service install (`services.install`)**: the single registration path
+  (`install(router, manifest, backend)`). It refuses a handler for an
+  undeclared command, a missing handler, a command outside the service's
+  own namespace, and a duplicate registration, and it wires
+  `bridge.validate_empty` for commands that declare no params. The
+  capability gate stays in `bridge.Router.call_json`; a `blocking`
+  command (a modal native dialog) is the documented exception to the
+  ADR-0010 threading rule and must never be called from `v test`.
+- **Dialog service (`services/dialog`)**: the first service with a real
+  OS backend. Commands `dialog.open` / `dialog.save` / `dialog.message`,
+  options validated in pure V (kind must match the command, bounded
+  strings, filters must be bare extensions), result
+  `{canceled, paths, button}` — a dismissal is a *result*, not an error.
+  Windows: Common Item Dialog + `MessageBoxW` behind `dialog_shim.h`
+  (UTF-8 C ABI, NUL-separated paths; V has no COM projection). Linux: an
+  explicit stub until a Linux toolchain exists. See ADR-0014.
+- **os-info service (`services.os_info`)**: host facts only (`os_info.get`
+  → os, arch, hostname, cwd, home, temp, exe, cpus). The reference
+  service with no native half; capability-gated like everything else.
 - **Binding spec (`generator.MethodSpec`)**: static description of one
   bound method used to emit TypeScript declarations (`generate_dts`).
-  Hand-written specs for now; compile-time auto-derivation is Phase 5+.
+  Hand-written specs for now; compile-time auto-derivation is Phase 7.
+  `services.Service.specs()` bridges a manifest onto this shape, and
+  `services.dts`/`services.snippets` render a manifest into the `.d.ts`
+  and the JS glue the CLI writes (`vails dts`, grant-driven).
 - **Config (`config.VailsConfig`, `vails.json`)**: the app's persisted
   project file (T6): name/version, `windows` list (`WindowConfig` maps
   1:1 onto `webview.Config` but the caller builds it, so `config`

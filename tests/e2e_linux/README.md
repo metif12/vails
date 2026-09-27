@@ -75,3 +75,42 @@ export VAILS_HOME=<vails checkout>   # only outside a checkout
 ./vails run      # expect: window at the dev URL; ping fails with
 # 'unknown method' (empty router — frontend iteration only, ADR-0013)
 ```
+
+## Phase 5 S1 wave 1 — services on Linux (ADR-0014, NOT verified here)
+
+This machine has no WSL/Linux V toolchain, so the Linux service backend
+was **not** written blind: `services/dialog_linux.c.v` is an explicit
+stub (`error('dialog.open: not implemented on linux yet (Phase 5b …)')`).
+On Linux today: `os_info` works, `dialog.*` rejects with that message, and
+the example still renders (it shows the error in its status line).
+
+This is the checklist for whoever has a Linux box (Phase 5b):
+
+```sh
+v -gc none -o dialog ./examples/dialog
+./dialog
+# 1. "Open file…" -> GtkFileChooserDialog, parented to the GTK window,
+#    the params' title + filters applied, UTF-8 paths in the result
+# 2. cancel -> the promise resolves with {canceled: true} (not a rejection)
+# 3. "Save as…" -> default name in the name field
+# 4. "Ask…"/"Confirm…" -> GtkMessageDialog with ok / yes-no-cancel
+# 5. "Read host info" -> os_info.get resolves (no native code involved)
+# 6. "Call an ungranted command" -> 'forbidden: …'
+```
+
+What the implementation must respect (recorded in the stub's header):
+
+- parent the chooser to `Ctx.parent` (the GdkWindow) — the same handle
+  `webview.Ctx` hands the app on Linux;
+- run it from the GTK main loop: handlers already run there, and
+  `gtk_dialog_run()` spins a nested loop, which is exactly why modal
+  services are allowed to block (ADR-0014). Never `gtk_main_quit` from a
+  response handler;
+- keep UTF-8 end to end (`g_filename_to_utf8` / `g_filename_from_utf8`),
+  because the V side speaks UTF-8 JSON;
+- map the response to the same `Result` shape (`canceled` / `paths`), and
+  map a GTK failure to an error, never to a silent empty result.
+
+Same rule for the rest of the catalog (clipboard via GTK clipboard or
+xclip, notification via libnotify/`notify-send`, opener via `xdg-open`):
+pure-V seam + tests first, native side second (AGENTS.md §4).

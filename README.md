@@ -7,10 +7,11 @@ implementation is idiomatic V — and improves on both Wails and Tauri where
 V is stronger (sub-second builds, `v -live`, `veb` livereload, a single
 binary, direct C interop with zero COM code on our side).
 
-> Status: Phases 0–2 E2E ✅ on **Windows** (Edge/WebView2) and **Linux**
+> Status: Phases 0–4 E2E ✅ on **Windows** (Edge/WebView2) and **Linux**
 > (WebKitGTK) — screenshots in `tests/e2e_windows/` and
-> `tests/e2e_linux/run_headless.sh`. macOS comes in Phase 6, mobile is
-> planned (see ROADMAP).
+> `tests/e2e_linux/run_headless.sh`. Phase 5 S1 wave 1 (the `dialog` and
+> `os-info` services, the T5 manifest model, `vails dts`) is
+> Windows-proven; macOS comes in Phase 6, mobile is planned (see ROADMAP).
 
 ## Ideas & features
 
@@ -33,10 +34,16 @@ Current state (all verified, not promised):
 
 - Window + WebView on Windows and Linux, HTML rendering proven by screenshot
 - JS → V → JS round trip: `window.vails.call('ping')` → V handler → `pong`
+- V → JS events: `webview.Ctx.emit` (services push results/events back)
 - JSON-RPC bridge (`bridge/`), two-way event bus (`events/`), JS escaping
-  (`jsesc/`), asset serving with traversal protection (`assets/`), `.d.ts`
-  generation (`generator/`), native service stubs (`services/`)
-- Planned next: strict IPC contract (T2), light channels (T3), mobile prep (M0) —
+  (`jsesc/`), asset serving with traversal protection (`assets/`), a dev
+  server with livereload (`dev/`), the `vails` CLI (`cli/`), and
+  services as plugin manifests (`services/`, T5) with grant-driven
+  `.d.ts` generation (`vails dts`)
+- Services: **`dialog`** (native file picker / save dialog / message box —
+  Windows E2E proof in `tests/e2e_windows/dialog.png`) and **`os-info`**
+- Planned next: `notification`, native `clipboard`, `menu`, `tray`,
+  `opener` (Phase 5 S1 wave 2), then the Linux backends (Phase 5b) —
   see ROADMAP.md
 
 ## Comparison
@@ -47,11 +54,11 @@ Current state (all verified, not promised):
 | Web engine | OS native (WebView2/WKWebView/WebKitGTK) | OS native (wry) | OS native (webview lib / WebKitGTK) |
 | App model | Single window + services (v3) | Multi-window + labels | Single window ✅ / multi-window (planned) |
 | JS → backend | Bound methods, reflection-based | `invoke` commands (typed) | Bound methods, explicit registration ✅ |
-| Backend → JS | Events | Events + channels | Events ✅ / channels (planned) |
-| Security model | Open bridge | Capabilities + permissions + scopes | Capabilities (planned, T1) |
-| Services/plugins | Built-in services (v3) | 30+ plugins | Service stubs ✅ / plugin manifests (planned, T5) |
+| Backend → JS | Events | Events + channels | Events ✅ / channels ✅ (T3) |
+| Security model | Open bridge | Capabilities + permissions + scopes | Capabilities ✅ (T1) + service commands as grant names |
+| Services/plugins | Built-in services (v3) | 30+ plugins | Service manifests + first services ✅ / dialog, os-info (T5, ADR-0014) |
 | Mobile | v3: Android ✅ / iOS ✅ | Android + iOS | Planned (M0–M4, ADR-0006) |
-| Config file | `build/config.yml` (v3) | `tauri.conf.json` | `vails.json` (planned, T6) |
+| Config file | `build/config.yml` (v3) | `tauri.conf.json` | `vails.json` ✅ (T6) |
 | Build speed | Go toolchain (tens of seconds) | Rust/cargo (minutes) | V + gcc (≈ seconds) ✅ |
 | Binary size story | Single Go binary | ~600KB minimal | Single V binary ✅ |
 | License | MIT | Apache-2.0 / MIT | MIT |
@@ -66,13 +73,14 @@ Current state (all verified, not promised):
 | `events/` | Two-way event bus (JS <-> V) + `to_js` snippets |
 | `jsesc/` | JS string-literal escaping shared by bridge/events |
 | `assets/` | Asset serving with traversal protection; `$embed_file` prod / `veb` dev (Phase 3) |
-| `services/` | Native services (clipboard stub → plugin manifests in T5) |
-| `generator/` | `.d.ts` generation for bound methods |
+| `services/` | Services as plugin manifests (T5 ✅, ADR-0014) + `install` path; `dialog` (Windows native), `os_info`, `clipboard` seam |
+| `generator/` | `.d.ts` generation for bound methods; `vails dts` drives it from service manifests |
 | `capabilities/` | Per-window command allowlists (T1 ✅, ADR-0007) |
 | `config/` | `vails.json` project config: windows, capabilities, asset root, bundle (T6 ✅, ADR-0008) |
 | `mobile/` | Mobile entry + no-op stubs (planned, M0) |
-| `cli/` | `vails init/run/build/doctor` |
+| `cli/` | `vails init/run/build/doctor/dts` |
 | `examples/hello/` | Minimal app (window + ping button) |
+| `examples/dialog/` | Two services in one window (native dialogs + os-info) |
 | `tests/e2e_windows/` | Manual Edge E2E + proof screenshot |
 | `tests/e2e_linux/` | Headless xvfb script + screenshot |
 | `docs/ADR/` | Architecture decisions (why, not what) |
@@ -177,22 +185,56 @@ v -o vails ./cli
 #   on Linux  : webkit2gtk version or MISSING + apt hint
 #   on Windows: gcc version + webview.h found/MISSING + pacman hint
 #   vails.json: ok | INVALID + reason | not found (optional here)
+#   services  : which services the capabilities grant (T5)
 
 # 3. scaffold a minimal app (default name: hello)
 ./vails init myapp
 ls myapp                                     # contains main.v + vails.json
-./vails run --config myapp/vails.json        # dry-run: validates + prints summary
+./vails run --config myapp/vails.json        # dev server + window at its URL
 ```
 
 `vails init <name>` creates `./<name>/main.v` — a single-file window that
-loads `<h1>Hello from Vails</h1>`. It is a starting point, not a full
-template: for the complete pattern (App + Router + handlers + frontend file),
-copy `examples/hello/`:
+loads the project frontend. It is a starting point; for the fuller pattern
+copy `examples/hello/` (bridge + handlers) or `examples/dialog/` (services
++ `on_ready` + generated `.d.ts`).
 
-- `examples/hello/main.v` — `application.new` → `register_service` →
-  `bridge.new_router` + `register('ping', …)` → `webview.run(label: 'main', …)`
-- `examples/hello/frontend/index.html` — the single source of truth for the UI;
-  the button calls `window.vails.call('ping')` and shows `pong`
+## Services (T5) and the generated `.d.ts`
+
+A service is a manifest (`services/manifest.v`) plus a native backend, and
+it registers through one path (`services.install`). Its commands **are**
+its capability names, so a grant in `vails.json` is all a frontend needs:
+
+```json
+"capabilities": [
+  { "id": "dialogs", "windows": ["main"], "commands": ["dialog.open", "dialog.save", "dialog.message"] }
+]
+```
+
+```sh
+./vails dts --config myapp/vails.json --js
+# wrote myapp/frontend/vails.d.ts (1 service(s): dialog)
+# wrote myapp/frontend/vails-services.js (load it from index.html)
+```
+
+The `.d.ts` is generated **from the grants**, so a TypeScript frontend can
+only type-check what it was actually allowed to call; grant names that no
+service provides (your own commands) are reported as such, not as errors.
+`--check` prints instead of writing (CI). In the app, services are
+installed from `Config.on_ready`, which is where the window handle a
+service needs to parent its native UI to exists:
+
+```v
+mut router := bridge.new_router()
+on_ready := fn [mut router] (ctx webview.Ctx) {
+    services.install_dialog(mut router, ctx) or { eprintln(err.msg()) }
+}
+webview.run(router: &router, registry: cfg.to_registry(), html: html, on_ready: on_ready)!
+```
+
+`v test .` never opens a window and never opens a native dialog: modal
+services are the documented exception to the "handlers stay fast" rule
+(ADR-0014), and a test that triggers one would block on a window nobody
+can click.
 
 Project config (`vails.json` with windows list, capabilities, asset roots,
 bundle settings) is live (T6, ADR-0008): `vails init` scaffolds it,
@@ -221,6 +263,24 @@ What success looks like: a 1024x768 window titled "Hello Vails", HTML
 rendered, clicking "ping backend" changes the status to "backend says: pong"
 (JS → V → JS round trip through `bridge.Router.handle_message`). Proof
 screenshots live in `tests/e2e_windows/pong.png` and `tests/e2e_linux/`.
+
+## Run the dialog example (services)
+
+```powershell
+$env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
+v -cc gcc -o dialog.exe ./examples/dialog    # same 5 DLLs next to the exe
+./dialog.exe
+# "Open file…" / "Open several…" / "Save as…" -> real Windows dialogs,
+# parented to the window; "Ask…"/"Confirm…" -> MessageBox; "Read host info"
+# -> the os_info service; "Call an ungranted command" -> `forbidden: …`
+```
+
+`vails dts` regenerates `examples/dialog/frontend/vails.d.ts` from its
+grants. `VAILS_DIALOG_PROBE=open|multi|save|message|host` makes the page
+call that command on load — the E2E hook used for the proof below (a
+synthetic click does not reach WebView2 content). On Linux the dialog
+service reports `not implemented` until Phase 5b; `os_info` works
+everywhere.
 
 ## Development workflow
 
@@ -255,6 +315,9 @@ Rules that matter daily:
 | `vails doctor`: `gcc: MISSING` (Windows) | Install MSYS2 ucrt64 toolchain, prepend `C:\msys64\ucrt64\bin` to `PATH` | `cli/vails.v` |
 | `vails doctor`: `webview: MISSING` (Windows) | `pacman -S mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader` | `cli/vails.v` |
 | `hello.exe` exits silently / WebView2 error | Install Edge WebView2 Runtime; copy the 5 DLLs next to the exe | `tests/e2e_windows/README.md` |
+| `services/` fails to build on Windows | It holds a `.c.v`: needs MSYS2 gcc (same as `webview/`). `v test ./services` fails without it | ADR-0014, `vails doctor` |
+| `dialog.*` rejects with `forbidden:` | The capability in `vails.json` does not grant that command (names are `dialog.open`, …) | ADR-0007/0014 |
+| `dialog.*` says `not implemented` on Linux | Expected until Phase 5b; the Linux backend is an explicit stub | ROADMAP Phase 5b |
 | Linux GUI crash / GC fork errors | Always build GUI apps with `-gc none` | ADR-0005, `examples/hello/main.v` header |
 | Black/blank window under Wayland | `unset WAYLAND_DISPLAY`, `GDK_BACKEND=x11`, `WEBKIT_DISABLE_COMPOSITING_MODE=1` | `AGENTS.md §1`, `run_headless.sh` |
 | `frontend/index.html not found` | Run from the repo root or the example dir so `load_frontend_html` finds its candidates | `examples/hello/main.v` |
