@@ -2,10 +2,9 @@
 
  checkboxes = state. Move exactly one phase at a time (see AGENTS.md §3).
 
-Current position (2026-09-27): Phases 0–2 + T1/T6/T2/T3/T4/T7/M0 done
-(plus the Phase 3 pure-V seam); remaining in Phase 3 is the `veb` dev
-server + `vails run` dev mode. Phase 4–7, T5, the M1-M4, C- and
-E-tracks below are planned, not started.
+Current position (2026-09-27): Phases 0–4 + T1/T6/T2/T3/T4/T7/M0 done.
+Next is Phase 5 services (S1 `dialog` first), then T5 plugin manifests.
+Phase 6–7, the M1-M4, C- and E-tracks below are planned, not started.
 
 - [x] **Phase 0 — Scaffold** (this repo): `v.mod`, module skeleton,
   `AGENTS.md`/`CONTEXT.md`/`ROADMAP.md`, ADRs, `examples/hello`,
@@ -23,14 +22,19 @@ E-tracks below are planned, not started.
   `tests/e2e_windows/pong.png`. Transport decided in ADR-0004/0005.
   Remaining: Linux C transport wiring (message handler + run_javascript)
   + V→JS event delivery via `webview_eval`.
-- [ ] **Phase 3 — Assets + dev experience**: `assets.Server` prod
-  (`Bundle`, filled with `$embed_file` by the app) vs dev (directory
-  reads; `veb` + browser livereload via `v -d veb_livereload watch run`
-  still pending); capability wiring done (`Server.resolve_for` /
-  `Bundle.resolve_for`, no grant = deny — ADR-0012). `vails run` uses
-  dev mode. This is where Vails beats Wails (sub-second rebuilds).
-- [ ] **Phase 4 — CLI**: `vails init/run/build/doctor` + `hello`
-  template; `doctor` checks `pkg-config`, webkitgtk, `v --version`.
+- [x] **Phase 3 — Assets + dev experience** (done 2026-09-27, ADR-0013):
+  `assets.Server` prod (`Bundle`, filled with `$embed_file` by the app)
+  vs dev (`dev.DevServer`: loopback stdlib-`net.http` server over the
+  project dir, capability-scoped via `resolve_for`, livereload poller
+  injected into HTML; stdlib chosen over `veb` so Windows tests stay
+  gcc-free — veb pulls fasthttp C). `vails run` opens the first window
+  at the dev URL (`--serve-only` for headless). This is where Vails
+  beats Wails (sub-second rebuilds via `v`).
+- [x] **Phase 4 — CLI** (done 2026-09-27, ADR-0013): `vails
+  init/run/build/doctor` + scaffold template (`main.v` + `vails.json`
+  with frontend grant + `frontend/` with ping demo); `doctor` checks
+  `v --version`, toolchain, `vails.json`, `asset_root`; `build` sets
+  `VMODULES` to the vails root (`VAILS_HOME` or walk-up).
 - [ ] **Phase 5 — Services** (full catalog below; one PR per service +
   Linux manual test; each: `services/<name>.v` seam + `_test.v` +
   capability + ADR line; T5 plugin manifests align here):
@@ -118,7 +122,7 @@ has its own track below.)
   documented and tested as the secure mode (test fails when hello's meta
   drifts from `default_csp()`).
 
-Execution order: T1 → T6 → T2 → T3 → T4 → T5 (T1, T6, T2, T3, T4, T7, M0 done; next: Phase 3 `veb` dev server, then Phase 4 CLI, then T5). Estimate: ~3 focused weeks.
+Execution order: T1 → T6 → T2 → T3 → T4 → Phase 3 → Phase 4 → T5 (all done except T5; next: Phase 5 S1 `dialog`, then T5). Estimate: ~3 focused weeks.
 Each item: code + tests on both OSes + short ADR + ROADMAP checkbox.
 
 ## Mobile track (both platforms, plan-only until SDK/macOS exist; ADR-0006)
@@ -167,7 +171,7 @@ Stays opt-in forever: OS webview (WebView2/WebKitGTK) is the default;
 `backend: 'chromium'` (per window, in `vails.json` + `webview.Config`)
 selects the bundled engine. `vails build` keeps both flavors (lean + bundled,
 ~120–200MB extra for CEF). Electron's fork is NOT used (no stable embed API,
-drags in Node — decided in the planned CEF ADR, next number 0013); CEF pinned to an upstream
+drags in Node — decided in the planned CEF ADR, next number 0014); CEF pinned to an upstream
 Chromium gives the same rendering without the fork patches.
 
 - [ ] **C0 — CEF spike (gates everything)**: throwaway C99 shim over CEF
@@ -178,7 +182,7 @@ Chromium gives the same rendering without the fork patches.
 - [ ] **C1 — Pure-V seam**: `webview.Config.backend` (`os_webview` default,
    `chromium` opt-in) + `validate()` stub error until C2; `WindowConfig.backend`
    string (`'os'` default, additive) with caller-side mapping; tests pure-V,
-   green on Windows; `CONTEXT.md` line + ADR-0013 (planned CEF decision).
+   green on Windows; `CONTEXT.md` line + ADR-0014 (planned CEF decision).
 - [ ] **C2 — CEF backends behind the facade**: `cef_shim.h` + thin
   `webview_cef_windows.c.v` / `webview_cef_linux.c.v` (`run_chromium_*`,
   dispatched from `webview.run`); bridge protocol reused as-is

@@ -1,12 +1,18 @@
-// vails CLI — version/doctor/init plus config-validating run/build
-// dry-runs (T6). Full dev-server run arrives in Phase 3, packaging in
-// Phase 7. Panics/exits are fine here (never in library modules).
+// vails CLI --- version/doctor/init/run/build (Phase 4).
+// init scaffolds a runnable project (main.v + vails.json + frontend/);
+// run serves the frontend in dev mode (loopback dev server with
+// livereload) and opens the first window at its URL; build compiles the
+// project dir to a binary (packaging stays Phase 7); doctor validates
+// the toolchain. Panics/exits are fine here (never in library modules).
 module main
 
+import bridge
 import config
+import dev
 import os
+import webview
 
-const version = '0.1.0'
+const version = '0.2.0'
 
 fn main() {
 	args := os.args[1..]
@@ -16,34 +22,29 @@ fn main() {
 	}
 	match args[0] {
 		'version' {
-			println('vails ' + version + ' (MVP, linux-first)')
+			println('vails ' + version)
 		}
 		'doctor' {
 			doctor()
 		}
 		'init' {
-			name := if args.len > 1 { args[1] } else { 'hello' }
+			name := if args.len > 1 && !args[1].starts_with('--') { args[1] } else { 'hello' }
 			init_app(name) or {
 				eprintln('init failed: ' + err.msg())
 				exit(1)
 			}
 		}
 		'run' {
-			cfg := load_project_config(args[1..]) or {
+			run_dev(args[1..]) or {
 				eprintln('run failed: ' + err.msg())
 				exit(1)
 			}
-			print_config_summary(cfg)
-			println('dev server: planned in Phase 3 — serving "' + cfg.asset_root +
-				'" statically for now')
 		}
 		'build' {
-			cfg := load_project_config(args[1..]) or {
+			build_app(args[1..]) or {
 				eprintln('build failed: ' + err.msg())
 				exit(1)
 			}
-			print_config_summary(cfg)
-			println('bundle: "' + cfg.bundle.name + '" (packaging arrives in Phase 7; DLLs stay side-by-side on Windows)')
 		}
 		else {
 			eprintln('unknown command: ' + args[0])
@@ -54,8 +55,13 @@ fn main() {
 }
 
 fn print_usage() {
-	println('usage: vails <version|doctor|init [name]|run|build> [--config path]')
-	println('  run/build read vails.json (default ./vails.json); full behavior in Phase 3/7')
+	println('usage: vails <version|doctor|init [name]|run|build> [flags]')
+	println('  init [name]          scaffold main.v + vails.json + frontend/')
+	println('  run [--config path] [--port N] [--serve-only]')
+	println('                       dev server + open first window at its URL')
+	println('                       (--serve-only: just serve, no window)')
+	println('  build [--config path] [--output path]')
+	println('                       compile the project dir to a binary')
 }
 
 // flag_value returns the value of `--flag value` or `--flag=value`,
@@ -72,75 +78,310 @@ fn flag_value(args []string, flag string, fallback string) string {
 	return fallback
 }
 
+fn has_flag(args []string, flag string) bool {
+	for a in args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
 fn load_project_config(args []string) !config.VailsConfig {
 	path := flag_value(args, '--config', 'vails.json')
 	return config.load(path)!
 }
 
-fn print_config_summary(cfg config.VailsConfig) {
-	println('app: ' + cfg.name + ' ' + cfg.version)
-	for w in cfg.windows {
-		println('  window "' + w.label + '": "' + w.title + '" ${w.width}x${w.height}')
+// project_dir_of returns the directory holding the config file so asset
+// reads resolve the same way regardless of the caller's cwd.
+fn project_dir_of(args []string) string {
+	path := flag_value(args, '--config', 'vails.json')
+	dir := os.dir(path)
+	if dir == '' {
+		return '.'
 	}
-	println('  asset_root: ' + cfg.asset_root)
-	println('  capabilities: ' + cfg.capabilities.len.str())
+	return dir
+}
+
+// run_dev implements `vails run`: loopback dev server (spawned) + first
+// window opened at its URL. The window carries an EMPTY router, so JS->V
+// calls fail with 'unknown method' until the real app binary runs --- this
+// mode is for frontend iteration (live reload on every file save), not
+// for bridge development.
+fn run_dev(args []string) ! {
+	cfg := load_project_config(args)!
+	port := flag_value(args, '--port', dev.default_port.str()).int()
+	if port <= 0 || port > 65535 {
+		return error('invalid --port (1-65535)')
+	}
+	root := project_dir_of(args)
+	reg := cfg.to_registry()
+	w := cfg.windows[0]
+	srv := dev.new_dev_server(root, cfg.asset_root, port, reg, w.label)
+	if has_flag(args, '--serve-only') {
+		println('serving "' + os.join_path(root, cfg.asset_root) + '" at ' + srv.dev_url())
+		srv.run()!
+		return
+	}
+	_ = spawn srv.run()
+	println('dev server: ' + srv.dev_url() + ' (reloads on every frontend save)')
+	mut router := bridge.new_router()
+	webview.run(
+		label:    w.label
+		title:    w.title
+		width:    w.width
+		height:   w.height
+		url:      srv.dev_url()
+		router:   &router
+		registry: reg
+	)!
+}
+
+// build_app implements `vails build`: compile the project dir (which must
+// hold main.v, e.g. from `vails init`) to a binary. Scaffolded projects
+// import vails modules by bare name (`bridge`, `webview`, ---), so the
+// compiler needs the vails source root on its module path: build sets
+// VMODULES to it (explicit VAILS_HOME wins, else walk-up from the CLI
+// binary and the cwd). GUI backends need the native toolchain too --- see
+// `vails doctor`. Packaging stays Phase 7.
+fn build_app(args []string) ! {
+	cfg := load_project_config(args)!
+	root := project_dir_of(args)
+	main_path := os.join_path(root, 'main.v')
+	if !os.exists(main_path) {
+		return error('no main.v in "' + root + '" (`vails init` creates one)')
+	}
+	home := vails_home()
+	if home == '' {
+		return error('cannot find the vails source root (no v.mod + webview/ found from the CLI or cwd) --- set VAILS_HOME to your vails checkout')
+	}
+	out := flag_value(args, '--output', cfg.bundle.name)
+	mut cc := ''
+	$if windows {
+		cc = ' -cc gcc'
+	}
+	cmd := 'v' + cc + ' -o "' + out + '" "' + root + '"'
+	println('+ VMODULES=' + home + ' ' + cmd)
+	old_modules := os.getenv('VMODULES')
+	os.setenv('VMODULES', join_modules_path(home, old_modules), true)
+	r := os.execute(cmd)
+	os.setenv('VMODULES', old_modules, true)
+	if r.exit_code != 0 {
+		return error('compile failed:\n' + r.output)
+	}
+	println('built: ' + out + ' (DLLs stay side-by-side on Windows; packaging arrives in Phase 7)')
+}
+
+// vails_home locates the vails source root for VMODULES: explicit
+// VAILS_HOME first, then walk-up from the CLI binary (installed next to
+// source) and from the cwd (monorepo / in-checkout projects).
+fn vails_home() string {
+	h := os.getenv('VAILS_HOME')
+	if h != '' && is_vails_root(h) {
+		return h
+	}
+	for base in [os.dir(os.executable()), os.getwd()] {
+		mut dir := base
+		for _ in 0 .. 8 {
+			if is_vails_root(dir) {
+				return dir
+			}
+			parent := os.dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return ''
+}
+
+// is_vails_root recognizes the vails checkout (v.mod plus the core
+// module dirs a scaffolded main.v imports from).
+fn is_vails_root(dir string) bool {
+	return dir != '' && dir != '.' && os.exists(os.join_path(dir, 'v.mod'))
+		&& os.is_dir(os.join_path(dir, 'webview')) && os.is_dir(os.join_path(dir, 'bridge'))
+}
+
+fn join_modules_path(home string, old string) string {
+	mut sep := ':'
+	$if windows {
+		sep = ';'
+	}
+	if old == '' {
+		return home
+	}
+	return home + sep + old
 }
 
 fn doctor() {
 	println('vails doctor')
-	println('  v version : check with `v version` (need 0.5.x)')
-	println('  os        : ' + os.user_os())
+	println('  vails       : ' + version)
+	home := vails_home()
+	if home == '' {
+		println('  vails home  : NOT FOUND (set VAILS_HOME --- needed by `vails build` outside a checkout)')
+	} else {
+		println('  vails home  : ' + home)
+	}
+	vv := os.execute('v version')
+	if vv.exit_code == 0 {
+		println('  v version   : ' + vv.output.trim_space())
+	} else {
+		println('  v version   : MISSING (`v` must be on PATH, need 0.5.x)')
+	}
+	println('  os          : ' + os.user_os())
 	$if linux {
 		r := os.execute('pkg-config --modversion webkit2gtk-4.1')
 		if r.exit_code == 0 {
-			println('  webkit2gtk: ' + r.output.trim_space())
+			println('  webkit2gtk  : ' + r.output.trim_space())
 		} else {
-			println('  webkit2gtk: MISSING (sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev)')
+			println('  webkit2gtk  : MISSING (sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev)')
 		}
 	} $else $if windows {
 		gcc := os.execute('gcc --version')
 		if gcc.exit_code == 0 {
-			println('  gcc       : ' + gcc.output.split_into_lines()[0])
+			println('  gcc         : ' + gcc.output.split_into_lines()[0])
 		} else {
-			println('  gcc       : MISSING (install MSYS2 ucrt64 toolchain + put C:\\msys64\\ucrt64\\bin on PATH)')
+			println('  gcc         : MISSING (install MSYS2 ucrt64 toolchain + put C:\\msys64\\ucrt64\\bin on PATH)')
 		}
 		header := 'C:/msys64/ucrt64/include/webview/webview.h'
 		if os.exists(header) {
-			println('  webview   : header found (' + header + ')')
+			println('  webview     : header found (' + header + ')')
 		} else {
-			println('  webview   : MISSING (pacman -S mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader)')
+			println('  webview     : MISSING (pacman -S mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader)')
 		}
 	} $else {
-		println('  webview   : Windows/Linux only in this MVP (Phase 6 adds macOS)')
-		println('  note      : pure-V modules (bridge/events/assets/…) still testable here')
+		println('  webview     : Windows/Linux only in this MVP (Phase 6 adds macOS)')
+		println('  note        : pure-V modules (bridge/events/assets/---) still testable here')
 	}
-	if os.exists('vails.json') {
-		config.load('vails.json') or {
-			println('  vails.json: INVALID (' + err.msg() + ')')
+	cfg_path := 'vails.json'
+	if os.exists(cfg_path) {
+		cfg := config.load(cfg_path) or {
+			println('  vails.json  : INVALID (' + err.msg() + ')')
 			return
 		}
-		println('  vails.json: ok')
+		println('  vails.json  : ok (' + cfg.windows.len.str() + ' window(s), ' +
+			cfg.capabilities.len.str() + ' capabilit(ies))')
+		if os.is_dir(cfg.asset_root) {
+			println('  asset_root  : ok ("' + cfg.asset_root + '")')
+		} else {
+			println('  asset_root  : MISSING ("' + cfg.asset_root + '" not found --- `vails run` has nothing to serve)')
+		}
 	} else {
-		println('  vails.json: not found (optional here; `vails init` creates one)')
+		println('  vails.json  : not found (optional here; `vails init` creates one)')
 	}
 }
 
-const hello_main = "module main
+// init_app scaffolds a runnable project: minimal main.v (config +
+// frontend file + ping, capability-gated), vails.json with the frontend
+// grant (so the dev server serves strictly, no special cases), and a
+// single-file frontend with a ping button.
+fn init_app(name string) ! {
+	os.mkdir_all(name) or { return error('cannot create dir: ' + err.msg()) }
+	os.mkdir_all(os.join_path(name, 'frontend')) or {
+		return error('cannot create frontend dir: ' + err.msg())
+	}
+	os.write_file(os.join_path(name, 'main.v'), scaffold_main)!
+	os.write_file(os.join_path(name, 'frontend', 'index.html'), scaffold_index.replace('APP_NAME', name))!
+	os.write_file(os.join_path(name, 'vails.json'), scaffold_config(name))!
+	println('created ./' + name + '/ (main.v + vails.json + frontend/)')
+	println('  dev   : cd ' + name + ' && vails run')
+	println('  app   : cd ' + name + ' && v run .')
+	println('  check : cd ' + name + ' && vails doctor')
+}
 
+// scaffold_config is default_config plus the frontend grant: without it
+// the dev server (and the window) would deny everything by default.
+fn scaffold_config(name string) string {
+	mut cfg := config.default_config(name)
+	cfg.capabilities << config.CapabilitySpec{
+		id:          'main-app'
+		windows:     ['main']
+		commands:    ['ping']
+		asset_roots: [cfg.asset_root]
+	}
+	return cfg.encode()
+}
+
+const scaffold_main = "module main
+
+import bridge
+import config
+import os
 import webview
 
+fn ping_handler(_ string) !string {
+	return 'pong'
+}
+
+// Minimal Vails app: window geometry and capability grants come from
+// vails.json; the UI is frontend/index.html. Handlers run on the webview
+// main thread: keep them fast, deliver heavy work as events.
 fn main() {
-	webview.run(title: 'Hello Vails', html: '<h1>Hello from Vails</h1>') or {
+	app_cfg := config.load('vails.json') or {
+		eprintln('vails.json: ' + err.msg())
+		exit(1)
+	}
+	html := os.read_file(os.join_path(app_cfg.asset_root, 'index.html')) or {
+		eprintln(err.msg())
+		exit(1)
+	}
+	w := app_cfg.window('main') or {
+		eprintln(err.msg())
+		exit(1)
+	}
+	mut router := bridge.new_router()
+	router.register_validated('ping', bridge.validate_empty, ping_handler) or {
+		eprintln(err.msg())
+	}
+	webview.run(
+		label:    w.label
+		title:    w.title
+		width:    w.width
+		height:   w.height
+		router:   &router
+		registry: app_cfg.to_registry()
+		html:     html
+	) or {
 		eprintln(err.msg())
 		exit(1)
 	}
 }
 "
 
-fn init_app(name string) ! {
-	os.mkdir_all(name) or { return error('cannot create dir: ' + err.msg()) }
-	os.write_file(os.join_path(name, 'main.v'), hello_main)!
-	os.write_file(os.join_path(name, 'vails.json'), config.default_config(name).encode())!
-	println('created ./' + name + '/main.v — run it on Linux with: v run ./' + name)
-	println('created ./' + name + '/vails.json — validate with: vails doctor')
-}
+const scaffold_index = '<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:; font-src \'self\' data:; connect-src \'self\'; media-src \'self\' blob:; object-src \'none\'; base-uri \'self\'; frame-ancestors \'none\'" />
+<title>APP_NAME</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.5; }
+button { font-size: 1rem; padding: 0.5rem 1rem; }
+button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+#status { margin-top: 1rem; }
+</style>
+</head>
+<body>
+<h1>APP_NAME</h1>
+<p><button id="ping">ping backend</button></p>
+<p id="status" role="status">not pinged yet</p>
+<script>
+"use strict";
+const status = document.getElementById("status");
+document.getElementById("ping").addEventListener("click", async () => {
+  // Outside a Vails window (plain browser / vails run) window.vails is
+  // missing: fail visibly instead of throwing.
+  if (!window.vails) { status.textContent = "no backend (open via the app binary)"; return; }
+  try {
+    status.textContent = "backend says: " + await window.vails.call("ping");
+  } catch (e) {
+    status.textContent = "error: " + e;
+  }
+});
+</script>
+</body>
+</html>
+'

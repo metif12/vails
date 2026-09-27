@@ -76,8 +76,22 @@ to stay consistent across sessions.
   directory reads (`Server.read`); both enforce the same traversal +
   allowlist checks. Registry-driven entry points `Server.resolve_for` /
   `Bundle.resolve_for` scope reads to the window's granted roots (no
-  grant = deny); full `veb` dev server with livereload is the remaining
-  Phase 3 work. See ADR-0012.
+  grant = deny); the dev side is `dev.DevServer` (loopback HTTP +
+  livereload, same checks). See ADR-0012/0013.
+- **Dev server (`dev.DevServer`, Phase 3)**: loopback stdlib-`net.http`
+  server over the project dir (stdlib, not `veb`, so Windows tests stay
+  gcc-free — ADR-0013). `root` = project dir, `asset_root` prefixes
+  every path; reads go through `assets.Server.resolve_for` (no grant =
+  deny, same as prod). `/` → `<asset_root>/index.html`; missing → 404,
+  traversal/outside-grant/no-grant → 403. HTML responses carry an
+  idempotent livereload poller (`/__vails_dev_version` =
+  `build_id:frontend_version`). `vails run` spawns it and opens the
+  first window at `dev_url()` with an EMPTY router (frontend iteration
+  only); `--serve-only` skips the window.
+- **CLI root (`vails_home`, Phase 4)**: `vails build` sets `VMODULES`
+  to the vails source root so scaffolded projects (bare imports) compile
+  anywhere: explicit `VAILS_HOME` wins, else walk-up from the CLI binary
+  and cwd; absent root fails fast. See ADR-0013.
 - **Service**: a named native capability (`clipboard`, `dialog`, …)
   registered on the `App` by string name. Implementations live in
   `services/` and may be OS-gated.

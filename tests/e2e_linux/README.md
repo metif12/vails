@@ -52,3 +52,26 @@ v run ./examples/hello
   confirm DevTools shows no CSP violations on load and the preview
   fallback (file:// open of `frontend/index.html`) renders with the
   counter running locally.
+
+## Phase 3/4 — dev server + CLI (ADR-0013; CLI E2E-verified on Windows)
+
+Headless runs need the usual env (see `run_headless.sh`):
+`unset WAYLAND_DISPLAY`, `GDK_BACKEND=x11`,
+`WEBKIT_DISABLE_COMPOSITING_MODE=1`, plus `-gc none` on every GUI
+build/run (Boehm vs WebKit fork, ADR-0005).
+
+```sh
+v -o vails ./cli && ./vails init smokeapp && cd smokeapp
+./vails doctor   # expect: vails home ok, vails.json ok, asset_root ok
+./vails run --serve-only --port 8421 &
+curl -s http://127.0.0.1:8421/ | grep __vails_dev_version
+# expect: the livereload poller script, injected before </body>
+curl -s http://127.0.0.1:8421/__vails_dev_version
+# expect: build_id:tree-fingerprint (moves on every frontend save)
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8421/nope
+# expect: 404
+export VAILS_HOME=<vails checkout>   # only outside a checkout
+./vails build    # expect: ./smokeapp binary
+./vails run      # expect: window at the dev URL; ping fails with
+# 'unknown method' (empty router — frontend iteration only, ADR-0013)
+```
