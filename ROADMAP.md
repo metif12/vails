@@ -2,15 +2,16 @@
 
  checkboxes = state. Move exactly one phase at a time (see AGENTS.md §3).
 
-Current position (2026-09-27): Phases 0–4 + T1/T6/T2/T3/T4/T7/M0 done, and
-Phase 5 S1 wave 1 + T5 done (ADR-0014): the `webview.Ctx` seam (V->JS emit
-+ parent handle, T7 CSP now wired natively), the service manifest/install
-model, the `dialog` service (Windows native, E2E-proofed) and `os-info`,
-`vails dts`, and the `examples/dialog` E2E proof.
-Next is Phase 5 S1 wave 2: `notification` → `clipboard` (native half) →
-`menu` → `tray` → `opener`. Linux dialog backends wait for a Linux
-toolchain (Phase 5b). Phase 6–7, the M1-M4, C- and E-tracks below are
-planned, not started.
+Current position (2026-09-27): Phases 0–4 + T1/T6/T2/T3/T4/T7/M0 done,
+Phase 5 S1 wave 1 (ADR-0014), and **wave 2** (ADR-0015): `clipboard`,
+`opener` and `notification` with real Windows *and* Linux backends, the
+per-service backend report in `vails doctor`, and the Linux JS↔V transport
+wired (it had been declared but never connected, so no Linux example had a
+bridge at all). `v test .` is green on both platforms.
+Next is Phase 5 S1 wave 3: `menu` → `tray` (both need a window-procedure
+seam, so they get their own ADR), then `opener`'s remaining polish, the GTK
+`dialog`, and `notification` on Linux. Phase 6–7, the M1-M4, C- and E-tracks
+below are planned, not started.
 
 - [x] **Phase 0 — Scaffold** (this repo): `v.mod`, module skeleton,
   `AGENTS.md`/`CONTEXT.md`/`ROADMAP.md`, ADRs, `examples/hello`,
@@ -21,13 +22,17 @@ planned, not started.
   Windows `webview_windows.c.v` (webview lib 0.12, Edge) opens with title.
   Findings recorded in ADR-0005 (`-gc none` on Linux, Wayland hijack,
   DLL side-by-side on Windows).
-- [x] **Phase 2 — JS↔V bridge (Windows side verified E2E)**:
-  pure-V seam (`handle_message`, `runtime_js`, `runtime_js_bound`,
-  `resolve_js`, `to_js`, `jsesc`) + Windows transport (`webview_bind` →
-  `bind_cb` → `webview_return`). Button → `pong` proven, proof in
-  `tests/e2e_windows/pong.png`. Transport decided in ADR-0004/0005.
-  Remaining: Linux C transport wiring (message handler + run_javascript)
-  + V→JS event delivery via `webview_eval`.
+- [x] **Phase 2 — JS↔V bridge (both backends verified E2E)**:
+  pure-V seam (`handle_message`, `handle_envelope_from`, `runtime_js`,
+  `runtime_js_bound`, `resolve_js`/`resolve_json`, `to_js`, `jsesc`) +
+  Windows transport (`webview_bind` → `bind_cb` → `webview_return`).
+  Button → `pong` proven, proof in `tests/e2e_windows/pong.png`. Transport
+  decided in ADR-0004/0005. The **Linux** transport was declared but never
+  connected until wave 2 found it (ADR-0015): no runtime injection, no
+  message channel, so every Linux example rendered in preview mode. It is
+  wired now — user script + `script-message-received` + a reply evaluated
+  back into the page — and proven by the same clipboard round trip that
+  proves the service.
 - [x] **Phase 3 — Assets + dev experience** (done 2026-09-27, ADR-0013):
   `assets.Server` prod (`Bundle`, filled with `$embed_file` by the app)
   vs dev (`dev.DevServer`: loopback stdlib-`net.http` server over the
@@ -41,9 +46,10 @@ planned, not started.
   with frontend grant + `frontend/` with ping demo); `doctor` checks
   `v --version`, toolchain, `vails.json`, `asset_root`; `build` sets
   `VMODULES` to the vails root (`VAILS_HOME` or walk-up).
-- [ ] **Phase 5 — Services** (S1 wave 1 shipped 2026-09-27, ADR-0014;
-   full catalog below. Each next wave: `services/<name>.v` seam +
-   `_test.v` + capability + ADR line, one PR per service + manual test):
+- [ ] **Phase 5 — Services** (S1 wave 1 + wave 2 shipped 2026-09-27,
+   ADR-0014/0015; full catalog below. Each next wave: `services/<name>.v`
+   seam + `_test.v` + capability + ADR line, one PR per service + manual
+   test):
   - [x] S1 core wave 1 (done, ADR-0014): `webview.Ctx` seam (V->JS
     `emit` + native parent handle, closing the Phase 2 event-delivery
     leftover, and wiring the T7 CSP onto the native path), the service
@@ -53,12 +59,23 @@ planned, not started.
     Linux toolchain exists), **`os-info`** (pure-V reference service,
     pulled forward from this list on purpose), `vails dts` (grant-driven
     `.d.ts` + per-service JS snippets) and the `examples/dialog` proof.
-  - [ ] S1 core wave 2: `notification` → `clipboard` (native half, the
-    command surface already exists) → `menu` → `tray`
-    (StatusNotifier/AppIndicator — separate from `menu`) → `opener`
-    (open file/URL in external app) → `window-state` / `positioner`
-    (persist size/position). Cf. `v3/pkg/services`. `tray` needs the
-    HWND that `webview.Ctx.parent` now provides.
+  - [x] S1 core wave 2 (done, ADR-0015): the Linux toolchain exists (V at
+    `/root/vsrc/v`, GTK 3.24, webkit2gtk-4.1), so Linux backends are
+    compiled and proven rather than stubbed — and the Linux bridge, which
+    had been *declared* but never connected, now injects the runtime and
+    dispatches JS→V, so the first Linux service proofs could run at all.
+    **`clipboard`** (user32 `CF_UNICODETEXT` + the GTK clipboard, E2E
+    round trip on both platforms), **`opener`** (`ShellExecuteW` + GIO,
+    with a scheme allowlist because it is the one service that makes the OS
+    act on a frontend string), **`notification`** (Windows tray balloon,
+    with `is_supported` so a frontend can ask instead of firing into
+    nothing; a WinRT toast is the recorded follow-up), the per-service
+    backend report in `vails doctor`, and `examples/services` as the proof
+    vehicle (`tests/e2e_{windows,linux}/services.png`).
+  - [ ] S1 core wave 3: `menu` → `tray` (both need a hidden window +
+    `WndProc` + a C→V callback, so they get their own ADR first), then
+    `window-state` / `positioner` (persist size/position) and the GTK
+    `dialog`. Cf. `v3/pkg/services`.
   - [ ] S2 system (after S1): `single-instance` → `autostart` →
     `global-shortcut` (risk: Wayland limits) → `keychain`
     (cf. `v3/internal/keychain`) → `store` (persisted KV) →
@@ -69,13 +86,15 @@ planned, not started.
   - Out of scope (post-desktop, unchanged): signed `updater`,
     `sidecar` binaries, unrestricted `shell` / `process`, `sql` /
     `stronghold`, WebDriver engine, BT/serial/printer (community-level).
-- [ ] **Phase 5b — Linux service backends** (needs a Linux toolchain:
-  WSL Ubuntu with V built from source. Not this machine, so nothing here
-  was written blind): `dialog` (GtkFileChooserDialog + `gtk_dialog_run`
-  on the main loop), then `clipboard` (GTK clipboard or xclip),
-  `notification` (libnotify / `notify-send`), `opener`
-  (`xdg-open`). Manual checklist in `tests/e2e_linux/README.md`; the
-  rest of the catalog follows the same pure-V-first rule.
+- [ ] **Phase 5b — remaining Linux service backends** (the toolchain is no
+  longer the blocker — ADR-0015 proved it works; what is left is the parts
+  that need a human or a desktop session):
+  `dialog` (GtkFileChooserDialog + `gtk_dialog_run` on the main loop — the
+  last S1 item waiting on a human), then `notification` (libnotify or
+  GNotification; needs a D-Bus session to be visible at all), then the
+  `with` override for `opener` (a `.desktop` file rather than an app name).
+  `clipboard` and `opener` are already done (wave 2). Manual checklist in
+  `tests/e2e_linux/README.md`.
 - [ ] **Phase 6 — Cross-platform**: Windows first (WebView2/COM behind
   a C wrapper — V has no COM projection; highest risk), then macOS
   (WKWebView/ObjC). Freeze `application/` + `bridge/` API before starting.
@@ -154,8 +173,11 @@ has its own track below.)
 
 Execution order: T1 → T6 → T2 → T3 → T4 → Phase 3 → Phase 4 → Phase 5
 S1 wave 1 + T5 (all done; the V->JS event-delivery leftover of Phase 2
-closed with `webview.Ctx`). Next: Phase 5 S1 wave 2, then Phase 5b (Linux
-service backends). Estimate: ~3 focused weeks.
+closed with `webview.Ctx`) → Phase 5 S1 wave 2 (done 2026-09-27, ADR-0015:
+clipboard/opener/notification on both platforms, the backend report in
+`doctor`, and the Linux bridge that turned out to be declared-but-unwired).
+Next: Phase 5 S1 wave 3 (`menu` → `tray` behind a window-procedure ADR),
+then the rest of Phase 5b. Estimate: ~3 focused weeks.
 Each item: code + tests on both OSes + short ADR + ROADMAP checkbox.
 
 ## Mobile track (both platforms, plan-only until SDK/macOS exist; ADR-0006)
@@ -246,10 +268,13 @@ No example starts before the service it needs.
   `focus-visible` on every control, light+dark via
   `prefers-color-scheme`, LTR English, one column, and a preview
   fallback that degrades visibly outside a Vails window.
-- [ ] **E1 — todo** (after T4; later persisted via `store`)
-- [ ] **E2 — pomodoro** (after `notification` S1; live tick via T3 channel)
-- [ ] **E3 — clipboard-notes** (after full `clipboard`)
-- [ ] **E4 — files-mini** (after `dialog` + `scoped fs`)
+- [ ] **E1 - todo** (after T4; later persisted via `store`)
+- [ ] **E2 - pomodoro** (after `notification` S1 — the service exists now;
+  live tick via the T3 channel)
+- [x] **E3 - clipboard-notes** (partially unblocked: `clipboard` is
+  E2E-proven on both platforms, so the *service* is ready; the example
+  waits for `store` to make "notes" worth building)
+- [ ] **E4 - files-mini** (after the GTK `dialog` + `scoped fs`)
 - [ ] **E5 — capture-demo** (after `screencapture`)
 - [ ] **E6 — settings** (after `window-state` + `store`)
 

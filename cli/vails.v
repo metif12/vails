@@ -15,7 +15,7 @@ import os
 import services
 import webview
 
-const version = '0.2.0'
+const version = '0.3.0'
 
 fn main() {
 	args := os.args[1..]

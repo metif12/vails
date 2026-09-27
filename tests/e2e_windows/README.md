@@ -88,6 +88,62 @@ runtime):
 - `vails dts --config examples/dialog/vails.json --js` regenerates
   `examples/dialog/frontend/vails.d.ts` (committed) and the per-service JS
   snippet; `vails doctor` lists the granted services.
-- `v test .` is green (26 files) and never opens a window or a dialog —
+- `v test .` is green (29 files) and never opens a window or a dialog —
   modal services are the ADR-0014 exception and are only exercised through
   a fake backend in the tests.
+
+## Phase 5 S1 wave 2 — services: `clipboard` + `opener` + `notification` (ADR-0015, 2026-09-27)
+
+```powershell
+$env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
+v -cc gcc -o services.exe ./examples/services   # same 5 DLLs next to the exe
+$env:VAILS_SERVICES_PROBE = "clipboard"         # or: opener | notification | none
+./services.exe
+```
+
+Verified in this run (Windows 11 + MSYS2 gcc 16.1 + V 0.5.2 + WebView2
+runtime), screenshots taken with `capture.ps1` in this directory:
+
+- The **clipboard round trip needs no human**: the page writes
+  `vails clipboard proof — héllo 🌱` (non-ASCII on purpose: the Windows path
+  is UTF-8 → UTF-16 → clipboard → UTF-8) and reads it straight back, so the
+  status line *is* the proof. `VAILS_SERVICES_PROBE=clipboard`:
+
+  ![clipboard round trip](services.png)
+
+- **`opener`**: `open_url` on `https://vails.invalid/probe` →
+  `probe opener: ok - the OS accepted the URL` (ShellExecuteW returned > 32).
+  `open_url` with `file:///C:/Windows/win.ini` answers
+  `bad params: scheme "file" is not allowed (http, https, mailto, tel)`
+  before the OS sees anything. Proof: ![opener](opener.png)
+
+- **`notification`**: `is_supported` → `true`, then the tray balloon is
+  queued with the shell and a V worker removes the icon after the clamped
+  timeout. Proof: ![notification](notification.png)
+  - **Honest caveat**: the balloon itself does not appear in the screenshot.
+    Windows 11 routes legacy tray balloons to the Action Center (and can have
+    them disabled per app), so the machine-checkable evidence is the status
+    line plus `is_supported: true`; whether a balloon is *visible* is a
+    per-session setting, not something the service controls.
+  - Manual check by eye: run without a probe, press **Notify**, and confirm a
+    toast/balloon appears near the tray within ~8 s, and that no icon is left
+    behind afterwards (that is the lifetime worker; if one lingers, the
+    `spawn` in `notification_windows.c.v` is the thing to look at).
+- `Copy` / `Paste` by hand: put something in the clipboard from Notepad, press
+  **Paste** — the text shows up; press **Copy**, then paste into Notepad.
+- **Try it anyway** (the `file://` URL) → `bad params: …`, shown in green,
+  because that rejection is the feature.
+- **Ask is_supported** → `is_supported: true` on Windows.
+- **Call an ungranted command** → `forbidden: app.not_granted is not allowed
+  for window "main"`.
+
+### Taking the screenshots
+
+`capture.ps1` raises the target window (retrying, because a busy desktop
+races `SetForegroundWindow`) and then captures its rect — a shot of a covered
+window proves nothing:
+
+```powershell
+.\capture.ps1 -Out services.png -WindowTitle "Vails Services Demo"
+.\capture.ps1 -Out full.png     # whole screen (what a tray balloon needs)
+```

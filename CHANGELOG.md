@@ -16,10 +16,11 @@ Conventions for this file:
 - Architectural decisions do not live here; they live in `docs/ADR/`. An ADR
   is referenced by number in the entry that implements it.
 
-## [Unreleased]
+## [0.3.0] - 2026-09-27
 
 Phase 5 S1 wave 2: three services with real backends on both platforms, plus
-the fixes the codegen work surfaced.
+the five defects that only showed up once the code was compiled and run on
+Linux.
 
 ### Added
 
@@ -81,6 +82,28 @@ the fixes the codegen work surfaced.
   user32/GTK clipboard. `tests/e2e_windows/capture.ps1` makes the Windows
   screenshots repeatable, and `tests/e2e_linux/run_services.sh` does the same
   under xvfb.
+
+### Fixed
+
+Five defects that no amount of reading would have found, all of them on the
+Linux side, all of them now covered by a build or an E2E run:
+
+- The Linux **V→JS eval** passed a V function pointer where WebKit wants a
+  `GAsyncReadyCallback`, and the **GdkWindow** lookup had no reachable
+  declaration — so no Vails app had compiled on Linux since the `Ctx.parent`
+  work landed. Both are fixed behind `webview/webview_linux_shim.h`.
+- The Linux **JS→V transport was declared and never connected**: no runtime
+  injection, no message channel, so every example rendered in preview mode.
+  (Described under Changed above.)
+- `string.vstring()` **does not copy** the C block it wraps, so reading one
+  after `g_free` was a use-after-free. It bit the new Linux bridge and the new
+  GTK clipboard read; both now use `cstring_to_vstring`.
+- `dialog_test.v` called a **Windows-only helper**, which is why `v test .`
+  had never run on Linux.
+
+## [Unreleased]
+
+- Nothing yet.
 
 ## [0.2.0] - 2026-09-27
 

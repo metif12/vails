@@ -9,9 +9,11 @@ binary, direct C interop with zero COM code on our side).
 
 > Status: Phases 0–4 E2E ✅ on **Windows** (Edge/WebView2) and **Linux**
 > (WebKitGTK) — screenshots in `tests/e2e_windows/` and
-> `tests/e2e_linux/run_headless.sh`. Phase 5 S1 wave 1 (the `dialog` and
-> `os-info` services, the T5 manifest model, `vails dts`) is
-> Windows-proven; macOS comes in Phase 6, mobile is planned (see ROADMAP).
+> `tests/e2e_linux/`. Phase 5 S1 waves 1 and 2 are shipped (ADR-0014/0015):
+> the `dialog`, `os-info`, `clipboard`, `opener` and `notification` services
+> with real Windows backends, Linux backends for `clipboard` + `opener`, the
+> grant-driven `.d.ts`, and `vails doctor` reporting which backends are
+> native here. macOS comes in Phase 6, mobile is planned (see ROADMAP).
 
 ## Ideas & features
 
@@ -41,10 +43,16 @@ Current state (all verified, not promised):
   services as plugin manifests (`services/`, T5) with grant-driven
   `.d.ts` generation (`vails dts`)
 - Services: **`dialog`** (native file picker / save dialog / message box —
-  Windows E2E proof in `tests/e2e_windows/dialog.png`) and **`os-info`**
-- Planned next: `notification`, native `clipboard`, `menu`, `tray`,
-  `opener` (Phase 5 S1 wave 2), then the Linux backends (Phase 5b) —
-  see ROADMAP.md
+  Windows E2E proof in `tests/e2e_windows/dialog.png`), **`os-info`**,
+  **`clipboard`** (Windows + Linux, E2E round trip on both —
+  `tests/e2e_windows/services.png`, `tests/e2e_linux/services.png`),
+  **`opener`** (Windows + Linux, with a scheme allowlist) and
+  **`notification`** (Windows tray balloon, with `is_supported` so a
+  frontend can ask first)
+- `v test .` green on **both** Windows and Linux (29 test files)
+- Planned next: `menu` → `tray` (both need a window-procedure seam, so they
+  get their own ADR), the GTK `dialog`, `notification` on Linux,
+  `window-state` — see ROADMAP.md
 
 ## Comparison
 
@@ -56,7 +64,7 @@ Current state (all verified, not promised):
 | JS → backend | Bound methods, reflection-based | `invoke` commands (typed) | Bound methods, explicit registration ✅ |
 | Backend → JS | Events | Events + channels | Events ✅ / channels ✅ (T3) |
 | Security model | Open bridge | Capabilities + permissions + scopes | Capabilities ✅ (T1) + service commands as grant names |
-| Services/plugins | Built-in services (v3) | 30+ plugins | Service manifests + first services ✅ / dialog, os-info (T5, ADR-0014) |
+| Services/plugins | Built-in services (v3) | 30+ plugins | Service manifests + 5 services ✅ / dialog, os-info, clipboard, opener, notification (T5, ADR-0014/0015) |
 | Mobile | v3: Android ✅ / iOS ✅ | Android + iOS | Planned (M0–M4, ADR-0006) |
 | Config file | `build/config.yml` (v3) | `tauri.conf.json` | `vails.json` ✅ (T6) |
 | Build speed | Go toolchain (tens of seconds) | Rust/cargo (minutes) | V + gcc (≈ seconds) ✅ |
@@ -73,7 +81,7 @@ Current state (all verified, not promised):
 | `events/` | Two-way event bus (JS <-> V) + `to_js` snippets |
 | `jsesc/` | JS string-literal escaping shared by bridge/events |
 | `assets/` | Asset serving with traversal protection; `$embed_file` prod / `veb` dev (Phase 3) |
-| `services/` | Services as plugin manifests (T5 ✅, ADR-0014) + `install` path; `dialog` (Windows native), `os_info`, `clipboard` seam |
+| `services/` | Services as plugin manifests (T5 ✅, ADR-0014) + `install` path + `support` (per-OS backend report for `doctor`); `dialog` (Windows native), `os_info`, `clipboard` + `opener` (Windows + Linux), `notification` (Windows) |
 | `generator/` | `.d.ts` generation for bound methods; `vails dts` drives it from service manifests |
 | `capabilities/` | Per-window command allowlists (T1 ✅, ADR-0007) |
 | `config/` | `vails.json` project config: windows, capabilities, asset root, bundle (T6 ✅, ADR-0008) |
@@ -81,6 +89,7 @@ Current state (all verified, not promised):
 | `cli/` | `vails init/run/build/doctor/dts` |
 | `examples/hello/` | Minimal app (window + ping button) |
 | `examples/dialog/` | Two services in one window (native dialogs + os-info) |
+| `examples/services/` | Four services in one window (clipboard, notification, opener, os-info) + the E2E probe vehicle |
 | `tests/e2e_windows/` | Manual Edge E2E + proof screenshot |
 | `tests/e2e_linux/` | Headless xvfb script + screenshot |
 | `docs/ADR/` | Architecture decisions (why, not what) |
@@ -187,6 +196,8 @@ v -o vails ./cli
 #   on Windows: gcc version + webview.h found/MISSING + pacman hint
 #   vails.json: ok | INVALID + reason | not found (optional here)
 #   services  : which services the capabilities grant (T5)
+#   backends  : which services have a NATIVE backend on this machine, and
+#               which granted service is a stub here (ADR-0015)
 
 # 3. scaffold a minimal app (default name: hello)
 ./vails init myapp
@@ -227,15 +238,36 @@ service needs to parent its native UI to exists:
 ```v
 mut router := bridge.new_router()
 on_ready := fn [mut router] (ctx webview.Ctx) {
+    services.install_clipboard(mut router, ctx) or { eprintln(err.msg()) }
     services.install_dialog(mut router, ctx) or { eprintln(err.msg()) }
 }
 webview.run(router: &router, registry: cfg.to_registry(), html: html, on_ready: on_ready)!
 ```
 
-`v test .` never opens a window and never opens a native dialog: modal
-services are the documented exception to the "handlers stay fast" rule
-(ADR-0014), and a test that triggers one would block on a window nobody
-can click.
+One field-name rule worth knowing before you write a service: a V struct
+field name **is** the wire name (json2 drops keys it does not recognize, and
+`@json:` attributes do not survive V's C codegen), so a manifest's `ts_types`
+promise `default_path`, never `defaultPath`.
+
+The built-in catalog today, and where each one actually works:
+
+| Service | Commands | Windows | Linux |
+|---|---|---|---|
+| `dialog` | `open` / `save` / `message` | ✅ Common Item Dialog | stub (Phase 5b) |
+| `os_info` | `get` | ✅ pure V | ✅ pure V |
+| `clipboard` | `read_text` / `write_text` | ✅ user32 | ✅ GTK clipboard |
+| `opener` | `open_url` / `open_path` | ✅ `ShellExecuteW` | ✅ GIO (no `with`) |
+| `notification` | `notify` / `is_supported` | ✅ tray balloon | stub |
+
+`vails doctor` prints that same table for the machine you are on
+(`backends : 5/5 service(s) native here` on Windows), and
+`notification.is_supported` lets a frontend ask at runtime instead of firing
+a notification that quietly does nothing.
+
+`v test .` never opens a window, never opens a native dialog, and never
+touches the real clipboard: modal services are the documented exception to
+the "handlers stay fast" rule (ADR-0014), and the clipboard is shared machine
+state — its round trip is proven by `examples/services` instead.
 
 Project config (`vails.json` with windows list, capabilities, asset roots,
 bundle settings) is live (T6, ADR-0008): `vails init` scaffolds it,
@@ -283,13 +315,53 @@ synthetic click does not reach WebView2 content). On Linux the dialog
 service reports `not implemented` until Phase 5b; `os_info` works
 everywhere.
 
+## Run the services example (clipboard / opener / notification)
+
+```powershell
+$env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
+v -cc gcc -o services.exe ./examples/services   # same 5 DLLs next to the exe
+$env:VAILS_SERVICES_PROBE = "clipboard"         # or: opener | notification | none
+./services.exe
+```
+
+The clipboard probe is the one worth running: it copies a fixed non-ASCII
+string and pastes it back **without a human in the loop**, so the status line
+is the whole round trip through the real Windows clipboard — proof in
+`tests/e2e_windows/services.png`. `opener` reports what the shell said, and
+`notification` asks `is_supported` before firing.
+
+Linux (WSL Ubuntu, V at `/root/vsrc/v`):
+
+```sh
+cd /mnt/d/MyProjects/vails
+VAILS_SERVICES_PROBE=clipboard sh tests/e2e_linux/run_services.sh
+# builds with -gc none, runs under xvfb, screenshots to
+# tests/e2e_linux/services.png
+```
+
+Same proof through the GTK clipboard (`tests/e2e_linux/services.png`), and
+`VAILS_SERVICES_PROBE=notification` shows the honest Linux answer:
+`not supported here - the service says so instead of doing nothing`
+(`tests/e2e_linux/notification.png`).
+
+On Windows, `tests/e2e_windows/capture.ps1 -Out shot.png -WindowTitle "Vails
+Services Demo"` takes the screenshot and raises the window first — a shot of
+a covered window proves nothing.
+
 ## Development workflow
 
 Read `AGENTS.md` first — it is the workflow contract. The short version:
 
 ```sh
 v fmt -w .        # format before every commit (law, no debates)
-v test .          # must be green (Linux GUI tests stay manual)
+v test .          # must be green on Windows AND on Linux
+```
+
+Linux (WSL Ubuntu, the `v` there is not on `PATH`):
+
+```sh
+wsl -d Ubuntu -- /root/vsrc/v test .        # 29/29
+wsl -d Ubuntu -- /root/vsrc/v -gc none -o services ./examples/services
 ```
 
 Rules that matter daily:
@@ -305,6 +377,7 @@ Rules that matter daily:
 - Cross-platform code goes behind the `webview/` facade;
   `application/`, `bridge/`, `events/` stay OS-agnostic.
 - New native capability = new file under `services/` + test + ADR entry.
+- Every change gets a line in `CHANGELOG.md` under `## [Unreleased]`.
 - Work only inside the current phase's scope (`ROADMAP.md` checkbox); each
   phase ends with code + tests + a docs line.
 
@@ -318,7 +391,12 @@ Rules that matter daily:
 | `hello.exe` exits silently / WebView2 error | Install Edge WebView2 Runtime; copy the 5 DLLs next to the exe | `tests/e2e_windows/README.md` |
 | `services/` fails to build on Windows | It holds a `.c.v`: needs MSYS2 gcc (same as `webview/`). `v test ./services` fails without it | ADR-0014, `vails doctor` |
 | `dialog.*` rejects with `forbidden:` | The capability in `vails.json` does not grant that command (names are `dialog.open`, …) | ADR-0007/0014 |
-| `dialog.*` says `not implemented` on Linux | Expected until Phase 5b; the Linux backend is an explicit stub | ROADMAP Phase 5b |
+| `dialog.*` says `not implemented` on Linux | Expected until Phase 5b; the GTK chooser is the last S1 item waiting on a human | ROADMAP Phase 5b |
+| `notification.notify` says `not implemented` on Linux | Expected: a Windows tray balloon has no Linux equivalent yet. Ask `notification.is_supported` first — it answers `false` there | ADR-0015, ROADMAP Phase 5b |
+| A page renders but every button is disabled ("preview mode") | `window.vails` was never injected: the bridge is not wired on this platform/build | ADR-0015 (the Linux transport was declared, not connected) |
+| A Linux app fails to build with a `-Wincompatible-pointer-types` / implicit-declaration error | gcc 14+ treats those as errors; a V function pointer is not a WebKit callback, and some WebKit getters are not public in your version — read the installed headers | `webview/webview_linux_shim.h`, ADR-0015 Notes |
+| A service's params arrive empty although the `.d.ts` type-checks | The wire names are the V field names: `default_path`, not `defaultPath` | ADR-0015, `dialog_test.v` |
+| `vails doctor` shows a service as `stub` | It is honest: this platform has no backend for it yet (the note says which phase) | ADR-0015, `services/support.v` |
 | Linux GUI crash / GC fork errors | Always build GUI apps with `-gc none` | ADR-0005, `examples/hello/main.v` header |
 | Black/blank window under Wayland | `unset WAYLAND_DISPLAY`, `GDK_BACKEND=x11`, `WEBKIT_DISABLE_COMPOSITING_MODE=1` | `AGENTS.md §1`, `run_headless.sh` |
 | `frontend/index.html not found` | Run from the repo root or the example dir so `load_frontend_html` finds its candidates | `examples/hello/main.v` |
