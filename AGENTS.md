@@ -23,6 +23,9 @@ Linux (WSL Ubuntu, V built from source at /root/vsrc): GUI apps MUST use
 `unset WAYLAND_DISPLAY`, `GDK_BACKEND=x11`,
 `WEBKIT_DISABLE_COMPOSITING_MODE=1` — see tests/e2e_linux/run_headless.sh.
 
+The Linux `v` is **not on PATH**: call it as `wsl -d Ubuntu -- /root/vsrc/v <args>`
+(or `export PATH=/root/vsrc:$PATH` inside the shell first).
+
 `webview_linux.c.v` compiles on Linux only (V `_linux` suffix rule).
 All other modules must compile and pass tests on **Windows too** —
 this repo's CI machine is Windows without gcc/pkg-config.
@@ -68,4 +71,6 @@ Current phase is tracked in `ROADMAP.md` (checkbox). Rules:
 - `v fmt -w .` clean, `v test .` green on Windows.
 - New public API has a `_test.v` case and one line in `CONTEXT.md` if it
   changes the domain model.
+- `CHANGELOG.md` gets a line under `## [Unreleased]` (its conventions are in
+  that file's header).
 - Linux-only behavior documented in `tests/e2e_linux/README.md`.

@@ -84,6 +84,7 @@ Current state (all verified, not promised):
 | `tests/e2e_windows/` | Manual Edge E2E + proof screenshot |
 | `tests/e2e_linux/` | Headless xvfb script + screenshot |
 | `docs/ADR/` | Architecture decisions (why, not what) |
+| `CHANGELOG.md` | Per-release changelog (Keep a Changelog) |
 
 ## Prerequisites
 
@@ -327,5 +328,6 @@ Rules that matter daily:
 - `AGENTS.md` — workflow contract (read first)
 - `CONTEXT.md` — domain model
 - `ROADMAP.md` — phases + Tauri-inspired track (T1–T7) + mobile track (M0–M4)
+- `CHANGELOG.md` — what changed, per release (Keep a Changelog)
 - `docs/ADR/` — why-not-what decisions
 - `tests/e2e_windows/README.md`, `tests/e2e_linux/README.md` — manual GUI proofs
