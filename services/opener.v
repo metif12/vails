@@ -254,3 +254,27 @@ pub fn opener_backend(_ctx webview.Ctx) Backend {
 pub fn install_opener(mut router bridge.Router, ctx webview.Ctx) ! {
 	install(mut router, opener_manifest(), opener_backend(ctx))!
 }
+
+// opener_support answers "does opening things work on this platform?" (see
+// support.v).
+pub fn opener_support() ServiceStatus {
+	$if windows {
+		return ServiceStatus{
+			name:  'opener'
+			ready: true
+			note:  'ShellExecuteW (the `with` override works here)'
+		}
+	} $else $if linux {
+		return ServiceStatus{
+			name:  'opener'
+			ready: true
+			note:  'GIO default handler (`with` is not supported here)'
+		}
+	} $else {
+		return ServiceStatus{
+			name:  'opener'
+			ready: false
+			note:  'no backend on this platform yet (Phase 6, macOS)'
+		}
+	}
+}

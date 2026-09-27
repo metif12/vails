@@ -16,6 +16,14 @@ to stay consistent across sessions.
   injected (both backends use it; empty in URL mode). `Config.on_ready`
   hands the app the window's `Ctx` after the native window exists and
   before the event loop starts (services install there). See ADR-0014.
+- **Backend status (`services.ServiceStatus`, `support.v`)**: whether *this*
+  build has a real native backend for a service, on *this* platform.
+  `supports()` collects one `*_support()` per catalog service (each answers
+  from the same `$if` its dispatch uses, so they cannot drift), and
+  `report`/`ok_count` render it for `vails doctor`. A grant in `vails.json` is
+  not a promise — `notification.*` is a valid grant on Linux where the
+  backend is a stub — so doctor says so before the app runs. A stub always
+  carries a `note`. See ADR-0015.
 - **Window handle (`webview.Ctx`)**: the window-scoped runtime handle a
   service talks to: `emit(event, data)` (V -> JS via the `events.to_js`
   snippet), `run_js`, and `parent` (the native window handle, HWND /
@@ -24,7 +32,11 @@ to stay consistent across sessions.
   `emit` from a spawned worker is the answer to ADR-0010's
   "heavy work via spawn + result as event"; on Windows the eval must
   happen on the webview thread, so push it from a handler, not from a
-  worker. See ADR-0014.
+  worker. On Linux the same two values are filled by GTK: the eval
+  through `vails_run_javascript` and `parent` through
+  `gtk_widget_get_window` (both in `webview_linux_shim.h` /
+  `webview_linux.c.v`; the C shim exists because a V function pointer is
+  not a `GAsyncReadyCallback`). See ADR-0014/0015.
 - **Bridge (`bridge.Router`)**: maps a JS-initiated call to a V function.
   Wire format is JSON: `Request{id, method, params}` → `Response{id, result,
   err}` where `params`/`result` are raw JSON strings. No reflection:

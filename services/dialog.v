@@ -333,3 +333,29 @@ pub fn dialog_backend(ctx webview.Ctx) Backend {
 pub fn install_dialog(mut router bridge.Router, ctx webview.Ctx) ! {
 	install(mut router, dialog_manifest(), dialog_backend(ctx))!
 }
+
+// dialog_support answers "can this platform show a file picker?" (see
+// support.v). The Linux half is still a stub even though the toolchain now
+// exists: the GTK chooser is the last S1 item waiting on a human answering a
+// modal window, and it is scheduled in Phase 5b.
+pub fn dialog_support() ServiceStatus {
+	$if windows {
+		return ServiceStatus{
+			name:  'dialog'
+			ready: true
+			note:  'Common Item Dialog + MessageBoxW'
+		}
+	} $else $if linux {
+		return ServiceStatus{
+			name:  'dialog'
+			ready: false
+			note:  'stub: the GTK chooser lands in Phase 5b'
+		}
+	} $else {
+		return ServiceStatus{
+			name:  'dialog'
+			ready: false
+			note:  'no backend on this platform yet (Phase 6, macOS)'
+		}
+	}
+}

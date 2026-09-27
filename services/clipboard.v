@@ -137,3 +137,28 @@ pub fn install_clipboard(mut router bridge.Router, ctx webview.Ctx) ! {
 	}
 	install(mut router, clipboard_manifest(), backend)!
 }
+
+// clipboard_support answers "does the clipboard work on this platform?"
+// (see support.v). The `$if` is the same one the dispatch above uses, so the
+// answer and the implementation cannot drift.
+pub fn clipboard_support() ServiceStatus {
+	$if windows {
+		return ServiceStatus{
+			name:  'clipboard'
+			ready: true
+			note:  'user32 CF_UNICODETEXT'
+		}
+	} $else $if linux {
+		return ServiceStatus{
+			name:  'clipboard'
+			ready: true
+			note:  'GTK clipboard (GDK_SELECTION_CLIPBOARD)'
+		}
+	} $else {
+		return ServiceStatus{
+			name:  'clipboard'
+			ready: false
+			note:  'no backend on this platform yet (Phase 6, macOS)'
+		}
+	}
+}

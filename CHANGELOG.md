@@ -57,9 +57,20 @@ the fixes the codegen work surfaced.
   example page) now use `default_path` / `default_name`, and a test pins the
   pair together. A TypeScript frontend that was passing `defaultName` must
   rename it. See ADR-0015.
-- `v test .` now passes on **Linux** as well as Windows (27 test files). It
+- `v test .` now passes on **Linux** as well as Windows (29 test files). It
   never did: `dialog_test.v` referenced a Windows-only helper, which moved to
   pure V so the mapping is testable everywhere.
+- **A Vails app builds on Linux again.** The Linux backend had not compiled
+  since the `Ctx.parent` / V→JS work landed: `webkit_web_view_run_javascript`
+  was handed a V function pointer where WebKit wants a
+  `GAsyncReadyCallback`, and `gdk_window_get_window` was called without a
+  reachable declaration. Both are fixed behind a small C shim
+  (`webview/webview_linux_shim.h`), so the V→JS path and the Linux
+  `Ctx.parent` are real. See ADR-0015.
+- **`vails doctor` reports the native backends.** A new `backends` section
+  lists every built-in service with `ok`/`stub` for *this* platform, and names
+  a granted service that is a stub here. A `vails.json` grant is not a
+  promise, and doctor says so before the app runs. See ADR-0015.
 
 ## [0.2.0] - 2026-09-27
 

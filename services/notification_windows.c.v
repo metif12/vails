@@ -30,7 +30,6 @@ fn C.LoadIconW(hinstance voidptr, name &u16) voidptr
 // a visible diff and not a macro surprise.
 const nim_add = u32(0x00000000)
 const nim_delete = u32(0x00000002)
-const nif_message = u32(0x00000001)
 const nif_icon = u32(0x00000002)
 const nif_tip = u32(0x00000004)
 const nif_info = u32(0x00000010)

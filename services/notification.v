@@ -207,3 +207,21 @@ pub fn notification_backend(ctx webview.Ctx) Backend {
 pub fn install_notification(mut router bridge.Router, ctx webview.Ctx) ! {
 	install(mut router, notification_manifest(), notification_backend(ctx))!
 }
+
+// notification_support answers "can this platform show a notification?" (see
+// support.v). Same `$if` as the dispatch, so the two cannot disagree.
+pub fn notification_support() ServiceStatus {
+	$if windows {
+		return ServiceStatus{
+			name:  'notification'
+			ready: true
+			note:  'tray balloon (Shell_NotifyIconW); a WinRT toast would be richer'
+		}
+	} $else {
+		return ServiceStatus{
+			name:  'notification'
+			ready: false
+			note:  'no backend on this platform yet (Phase 5b: libnotify or GNotification)'
+		}
+	}
+}

@@ -343,6 +343,7 @@ fn doctor() {
 		println('  webview     : Windows/Linux only in this MVP (Phase 6 adds macOS)')
 		println('  note        : pure-V modules (bridge/events/assets/---) still testable here')
 	}
+	report_backends()
 	cfg_path := 'vails.json'
 	if os.exists(cfg_path) {
 		cfg := config.load(cfg_path) or {
@@ -362,6 +363,21 @@ fn doctor() {
 	}
 }
 
+// report_backends lists, per service, whether THIS build has a native
+// backend on THIS platform. A grant is not a promise: `vails.json` can grant
+// `notification.*` on a machine where notification is a stub, and the
+// frontend should hear that from doctor rather than from a promise
+// rejection. The answers come from the services themselves (services.supports
+// -> each service's own `*_support()`), so this function only prints.
+fn report_backends() {
+	list := services.supports()
+	println('  backends    : ' + services.ok_count(list).str() + '/' +
+		list.len.str() + ' service(s) native here')
+	for line in services.report(list) {
+		println('               ' + line)
+	}
+}
+
 // report_services tells the user which of the granted commands are
 // services (and therefore get a .d.ts + a JS snippet), so a missing
 // `vails dts` run is visible here instead of only in a type error.
@@ -377,6 +393,16 @@ fn report_services(cfg config.VailsConfig) {
 	}
 	println('  services    : ' + picked.map(it.name + ' ' + it.version).join(', ') +
 		' (run `vails dts` for the .d.ts)')
+	// A granted service whose backend is a stub here is worth naming, even
+	// though the grant is perfectly valid (the app may be shipped for the
+	// other platform).
+	for s in picked {
+		if st := services.status_of(s.name) {
+			if !st.ready {
+				println('                 ! ' + s.name + ' is a stub here: ' + st.note)
+			}
+		}
+	}
 	_ = unknown
 }
 

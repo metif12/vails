@@ -99,3 +99,14 @@ pub fn os_info_backend() Backend {
 pub fn install_os_info(mut router bridge.Router) ! {
 	install(mut router, os_info_manifest(), os_info_backend())!
 }
+
+// os_info_support is this service's answer to "does it work here?" (see
+// support.v). Always ready: there is no native half to be missing, which is
+// exactly what makes it the reference for the whole mechanism.
+pub fn os_info_support() ServiceStatus {
+	return ServiceStatus{
+		name:  'os_info'
+		ready: true
+		note:  'pure V, no platform code'
+	}
+}

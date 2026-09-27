@@ -49,9 +49,11 @@ fn launch_uri(uri string) ! {
 	mut gerr := GError{
 		message: unsafe { nil }
 	}
+	// Hoisted out of the call: a nested `unsafe { nil }` inside another
+	// `unsafe` block is a V error ("already inside unsafe block").
+	no_context := unsafe { nil }
 	ok := unsafe {
-		C.g_app_info_launch_default_for_uri(uri.str, unsafe { nil },
-			voidptr(&gerr))
+		C.g_app_info_launch_default_for_uri(uri.str, no_context, voidptr(&gerr))
 	}
 	if ok == 0 {
 		return error('opener: could not open ' + uri + ': ' + gerror_message(&gerr))
@@ -75,12 +77,16 @@ fn open_path_native(path string, with string) ! {
 	mut gerr := GError{
 		message: unsafe { nil }
 	}
-	abs := unsafe { C.g_canonicalize_filename(path.str, unsafe { nil }) }
+	// Both nil arguments are hoisted out of the call: a nested
+	// `unsafe { nil }` inside another `unsafe` block is a V error
+	// ("already inside unsafe block", ADR-0015).
+	no_base := unsafe { nil }
+	abs := unsafe { C.g_canonicalize_filename(path.str, no_base) }
 	if abs == unsafe { nil } {
 		return error('opener: could not resolve the path ' + path + ': ' +
 			gerror_message(&gerr))
 	}
-	uri := unsafe { C.g_filename_to_uri(abs, unsafe { nil }, voidptr(&gerr)) }
+	uri := unsafe { C.g_filename_to_uri(abs, no_base, voidptr(&gerr)) }
 	if uri == unsafe { nil } {
 		return error('opener: could not turn the path into a URI: ' +
 			gerror_message(&gerr))
