@@ -278,11 +278,18 @@ pub fn dialog_manifest() Service {
 
 // dialog_ts_types are the TypeScript shapes the generated .d.ts refers
 // to. They live in the manifest so codegen needs no second source.
+//
+// Field names are snake_case, and that is not a style choice: a V struct
+// field name IS the wire name (json2 does not map camelCase keys onto
+// snake_case fields, and a `@json:` attribute does not survive V's C codegen
+// - ADR-0015, Notes). Promising `defaultPath` here while the struct field is
+// `default_path` produced a .d.ts that type-checked and then silently
+// dropped the value.
 fn dialog_ts_types() []string {
 	return [
 		'\texport interface DialogFilter { name: string; extensions: string; }',
-		'\texport interface DialogOpenOptions { title?: string; defaultPath?: string; filters?: DialogFilter[]; multi?: boolean; }',
-		'\texport interface DialogSaveOptions { title?: string; defaultPath?: string; defaultName?: string; filters?: DialogFilter[]; }',
+		'\texport interface DialogOpenOptions { title?: string; default_path?: string; filters?: DialogFilter[]; multi?: boolean; }',
+		'\texport interface DialogSaveOptions { title?: string; default_path?: string; default_name?: string; filters?: DialogFilter[]; }',
 		"\texport interface DialogMessageOptions { title?: string; message: string; buttons?: 'ok' | 'okcancel' | 'yesnocancel'; }",
 		'\texport interface DialogFileResult { canceled: boolean; paths: string[]; button: string; }',
 		'\texport interface DialogMessageResult { canceled: boolean; paths: string[]; button: string; }',

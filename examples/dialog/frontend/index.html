@@ -272,7 +272,7 @@
 
   saveBtn.addEventListener("click", function () {
     withBusy(saveBtn, function () {
-      return dialog.save({ title: "Save as", defaultName: "notes.txt" });
+      return dialog.save({ title: "Save as", default_name: "notes.txt" });
     }).then(function (raw) {
       var res = typeof raw === "string" ? JSON.parse(raw) : raw;
       showPaths(res.paths);

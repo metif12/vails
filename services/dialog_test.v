@@ -57,6 +57,31 @@ fn test_parse_options_from_bare_string() {
 	assert opts.title == 'Save as'
 }
 
+// Every multi-word field the .d.ts promises has to be spelled exactly as the
+// V struct field, because json2 drops keys it does not recognize. This test
+// is the guard for that: the camelCase spellings decode to nothing, the
+// snake_case ones decode, and the ts_types block promises the latter.
+fn test_promised_wire_names_are_the_struct_field_names() {
+	opts := parse_options(kind_save,
+		'{"title":"Save","default_path":"C:\\\\tmp\\\\","default_name":"notes.txt"}') or {
+		panic(err.msg())
+	}
+	assert opts.default_path == 'C:\\tmp\\'
+	assert opts.default_name == 'notes.txt'
+	// the camelCase spelling the .d.ts used to promise: accepted as valid
+	// JSON, ignored by the decoder - which is exactly the silent failure
+	// this test exists to prevent
+	camel := parse_options(kind_save, '{"defaultName":"notes.txt"}') or {
+		panic(err.msg())
+	}
+	assert camel.default_name == ''
+	// and the ts_types block agrees with the struct
+	ts := dialog_ts_types().join(' ')
+	assert ts.contains('default_path?: string')
+	assert ts.contains('default_name?: string')
+	assert !ts.contains('defaultPath')
+}
+
 fn test_parse_options_rejects_garbage() {
 	mut failed := ''
 	parse_options(kind_open, 'not json') or { failed = err.msg() }

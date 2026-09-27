@@ -18,11 +18,28 @@ Conventions for this file:
 
 ## [Unreleased]
 
+Phase 5 S1 wave 2: three services with real backends on both platforms, plus
+the fixes the codegen work surfaced.
+
 ### Added
 
 - **Windows + Linux backends**: the WSL image has V (`/root/vsrc/v`), GTK 3.24
   and webkit2gtk-4.1, so a Linux service backend is compiled and proven again
   instead of stubbed. See ADR-0015.
+- **`opener`**: `opener.open_url` and `opener.open_path` hand a URL or a path
+  to the user's default handler — `ShellExecuteW` on Windows, GIO's
+  `g_app_info_launch_default_for_uri` on Linux (no `xdg-open` process
+  involved). `open_url` accepts only `http`, `https`, `mailto` and `tel`, and
+  `open_path` only a local path, so a granted capability cannot be turned into
+  a `file://` read or a `smb:` launch. `with` (an application override) is
+  Windows-only for now and says so on Linux. See ADR-0015.
+- **`notification`**: `notification.notify` shows a short message without
+  taking focus (a Windows tray balloon — no COM, no shim) and
+  `notification.is_supported` lets a frontend ask before trying, instead of
+  firing a notification that quietly does nothing on a platform with no
+  backend. Other platforms get an explicit "not implemented" error. The WinRT
+  toast (real Action Center notifications) and a real `tray` service need a
+  window-procedure seam and are the recorded next step. See ADR-0015.
 
 ### Changed
 
@@ -33,14 +50,14 @@ Conventions for this file:
   rejecting, and the payload is bounded at 1 MiB. `read_text`/`write_text` now
   take the window's `webview.Ctx` (writing needs the parent handle), which is a
   signature change to a service that had no native half yet. See ADR-0015.
-- **`opener`**: `opener.open_url` and `opener.open_path` hand a URL or a path
-  to the user's default handler — `ShellExecuteW` on Windows, GIO's
-  `g_app_info_launch_default_for_uri` on Linux (no `xdg-open` process
-  involved). `open_url` accepts only `http`, `https`, `mailto` and `tel`, and
-  `open_path` only a local path, so a granted capability cannot be turned into
-  a `file://` read or a `smb:` launch. `with` (an application override) is
-  Windows-only for now and says so on Linux. See ADR-0015.
-- `v test .` now passes on **Linux** as well as Windows (26 test files). It
+- **The generated `.d.ts` no longer promises camelCase the decoder drops.** A
+  V struct field name *is* the wire name: json2 silently ignores keys it does
+  not recognize, so the shipped `dialog` types offered `defaultPath` /
+  `defaultName` while the values were discarded. The types (and the `dialog`
+  example page) now use `default_path` / `default_name`, and a test pins the
+  pair together. A TypeScript frontend that was passing `defaultName` must
+  rename it. See ADR-0015.
+- `v test .` now passes on **Linux** as well as Windows (27 test files). It
   never did: `dialog_test.v` referenced a Windows-only helper, which moved to
   pure V so the mapping is testable everywhere.
 

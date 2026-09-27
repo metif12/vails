@@ -21,6 +21,7 @@ pub fn manifests() []Service {
 	// still need a window-proc seam (menu, tray).
 	return [
 		dialog_manifest(),
+		notification_manifest(),
 		clipboard_manifest(),
 		opener_manifest(),
 		os_info_manifest(),

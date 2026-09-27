@@ -152,6 +152,21 @@ to stay consistent across sessions.
 - **os-info service (`services.os_info`)**: host facts only (`os_info.get`
   → os, arch, hostname, cwd, home, temp, exe, cpus). The reference
   service with no native half; capability-gated like everything else.
+- **Notification service (`services/notification`)**: a short native message
+  the OS shows without stealing focus (`notification.notify` → `string`,
+  `notification.is_supported` → `boolean`). Windows: a tray balloon
+  (`Shell_NotifyIconW` + `NIF_INFO`, no COM) whose icon a V worker removes
+  again after the clamped timeout (`clamp_timeout`, 1.5–60 s), because a tray
+  icon left behind outlives the balloon. Every other platform is an explicit
+  stub, and `is_supported` answers `false` there, so a frontend can ask
+  instead of firing a notification that quietly does nothing. The validated
+  byte bound (512/128) is deliberately wider than the shell's fixed fields
+  (256/64 UTF-16 units): a long body is shown clipped, not refused. A WinRT
+  toast is the recorded follow-up (ADR-0015).
+- **Wire field names are snake_case**: a V struct field name *is* the wire
+  name — json2 drops keys it does not recognize, and a `@json:` attribute
+  does not survive V's C codegen. So `ts_types` promises `default_path`,
+  never `defaultPath`; `dialog_test.v` guards the pair. See ADR-0015 Notes.
 - **Opener service (`services/opener`)**: hand a URL or a local path to the
   user's default handler (`opener.open_url` → `string`,
   `opener.open_path` → `string`). It is the one service whose job is making
