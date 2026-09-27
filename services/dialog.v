@@ -220,6 +220,29 @@ pub fn parse_paths(buf string) []string {
 	return out
 }
 
+// dialog_rc maps a backend return code to a Result: 0 is a cancellation (a
+// normal result), a negative code is a failure carrying the backend's own
+// message, anything else is a success with the paths in buf.
+//
+// The mapping is pure V on purpose — it is the part worth testing, and
+// keeping it here means dialog_test.v compiles (and passes) on Linux too,
+// not just where the shim exists. The C side supplies `reason`, so no
+// `fn C.*` leaks into this file (ADR-0015).
+pub fn dialog_rc(rc int, buf string, reason string) !Result {
+	if rc == 0 {
+		return Result{
+			canceled: true
+		}
+	}
+	if rc < 0 {
+		return error('dialog: ' + reason)
+	}
+	return Result{
+		canceled: false
+		paths:    parse_paths(buf)
+	}
+}
+
 // dialog_manifest is the service manifest (T5).
 pub fn dialog_manifest() Service {
 	return Service{

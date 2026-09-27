@@ -314,13 +314,18 @@ fn test_backend_is_pending_on_linux() {
 }
 
 fn test_dialog_rc_maps_shim_codes() {
-	// 0 = canceled, n>0 = n paths, <0 = shim error (message attached by
-	// the backend, so the mapping is what matters here).
-	mut res := dialog_rc(0, '') or { panic('canceled is not an error') }
+	// 0 = canceled, n>0 = n paths, <0 = shim error (the message comes from
+	// the backend, so the mapping is what matters here). Pure V, so this
+	// test runs on Linux too.
+	mut res := dialog_rc(0, '', '') or { panic('canceled is not an error') }
 	assert res.canceled
-	res = dialog_rc(2, 'C:\\a.txt\x00C:\\b.txt\x00') or { panic(err.msg()) }
+	res = dialog_rc(2, 'C:\\a.txt\x00C:\\b.txt\x00', '') or { panic(err.msg()) }
 	assert !res.canceled
 	assert res.paths.len == 2
+	// a negative code is an error carrying the backend's message
+	mut failed := false
+	dialog_rc(-1, '', 'the shell refused') or { failed = true }
+	assert failed
 }
 
 fn test_installed_dialog_does_not_leak_other_namespaces() {

@@ -28,27 +28,10 @@ fn C.vails_dialog_last_error() &char
 // 64 KB has no business on the stack.
 const path_buffer_len = 65536
 
-// dialog_rc maps a shim return code to a Result. Canceled (0) is a normal
-// result; -1/-2 are errors with the shim's message attached.
-fn dialog_rc(rc int, buf string) !Result {
-	if rc == 0 {
-		return Result{
-			canceled: true
-		}
-	}
-	if rc < 0 {
-		reason := unsafe { C.vails_dialog_last_error().vstring() }
-		return error('dialog: ' + reason)
-	}
-	return Result{
-		canceled: false
-		paths:    parse_paths(buf)
-	}
-}
-
 // with_buffer runs native_call with the shared path buffer and converts
 // its return code. native_call takes the buffer, so every command uses the
-// same path-flattening and error mapping.
+// same path-flattening and error mapping: dialog_rc (pure V) owns the
+// mapping, this file owns the shim's error message.
 type BufferCall = fn (out &u8, len int) int
 
 fn with_buffer(native_call BufferCall) !Result {
@@ -56,7 +39,12 @@ fn with_buffer(native_call BufferCall) !Result {
 	// path buffer that outlives one call would be a use-after-free.
 	mut buf := []u8{cap: path_buffer_len, len: path_buffer_len}
 	rc := native_call(unsafe { &buf[0] }, buf.len)
-	return dialog_rc(rc, buf.bytestr())
+	reason := if rc < 0 {
+		unsafe { C.vails_dialog_last_error().vstring() }
+	} else {
+		''
+	}
+	return dialog_rc(rc, buf.bytestr(), reason)
 }
 
 // button_flags maps the frontend's button-set names to the shim's numeric

@@ -5,6 +5,9 @@
 /hello
 /hello.exe
 *.exe
+# `v test` leaves the test binary next to its _test.v file; on Linux it has
+# no extension (services/dialog_test), on Windows *.exe above covers it.
+*_test
 .vmodules/
 .v/
 

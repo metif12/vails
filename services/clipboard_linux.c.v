@@ -38,7 +38,7 @@ fn read_text_native(_ctx webview.Ctx) !string {
 	if raw == unsafe { nil } {
 		return ''
 	}
-	text := unsafe { vstring(raw) }
+	text := unsafe { raw.vstring() }
 	unsafe { C.g_free(voidptr(raw)) }
 	return text
 }
