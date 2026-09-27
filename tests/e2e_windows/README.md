@@ -14,3 +14,11 @@ Verified 2026-09-26: full JS→V→JS round trip (`window.vails.call('ping')`
 → promise resolves). Proof:
 
 ![pong proof](pong.png)
+
+## T3 channels / T7 CSP (pure-V, verified via `v test .`)
+
+- Channels (ADR-0011): eval-only — evaluate a `Channel.push_js` snippet
+  through the backend and confirm `onEvent('ch_<n>')` fires in order,
+  then the `<id>:close` marker after `close_js`.
+- CSP (ADR-0012): hello ships `webview.default_csp()` verbatim; confirm
+  no CSP violations in DevTools on load.

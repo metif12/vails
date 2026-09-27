@@ -20,10 +20,23 @@ to stay consistent across sessions.
   JSON, never errors). It unwraps the webview library's one-element array
   wrapping (`unwrap_args`) and accepts a bare object (raw WebKitGTK path).
   `runtime_js()` is the injected `window.vails` runtime
-  (`call`/`onEvent` + internal `__resolve`/`__emit`); `runtime_js_bound(name)`
+  (`call`/`emit`/`onEvent` + internal `__resolve`/`__emit`); `runtime_js_bound(name)`
   is the same runtime for the webview-library backend where the bound fn
   resolves with PARSED JSON (normalized before `__resolve`). `resolve_js(res)`
   builds the reply snippet. See ADR-0004/0005.
+- **IPC contract (T2)**: command = request/response via
+  `call_json(window_label, id, method, params, reg)` (capability gate, then
+  params-shape validation via `register_validated` + `ParamsValidator`, then
+  handler); event = one-way, no reply via `notify(window_label, event, data,
+  reg)` (gate only; the app forwards to its own `events.Bus`). Wire shapes:
+  `Notify{event, data}`, `NotifyAck{ok, err}` (ignored by JS `emit`), and
+  `handle_envelope_from` (the single native entry point; `method` set →
+  command, `event` set → event). Standard err prefixes (wire contract):
+  `unknown method:`, `forbidden:`, `bad request:`, `bad params:`,
+  `bad event:` (builders `err_unknown/…`). Threading rule: handlers run on
+  the webview main thread → fast/non-blocking; heavy work via `spawn` +
+  result as event. `webview.Config.registry` (empty = deny all) feeds the
+  gate; `validate_empty` covers no-arg commands. See ADR-0010.
 - **Event (`events.Bus`)**: fire-and-forget pub/sub both directions.
   `on(event, handler)` / `emit(event, data) returns handler-count`.
   Ordering guarantee: handlers run in registration order, synchronously
@@ -31,15 +44,56 @@ to stay consistent across sessions.
   `to_js(event, data)` builds the `__emit` evaluate snippet for the JS side.
 - **JS escaping (`jsesc.escape`)**: single-quote JS-literal escaping
   (`'`, `\`, newlines, `<`→`\x3c`); shared by `resolve_js` and `to_js`.
+- **Channel (`bridge.Channel`/`ChannelHub`, T3)**: Tauri-`Channel`
+  equivalent for progress/streaming. `new_hub().open(event)` mints
+  `ch_<n>` ids (no globals, one hub per window); `push_js(data)` builds
+  the `__emit(id, …)` eval snippet (delivery on the id, parallel streams
+  never interleave; push-after-close errors); `close_js()` emits the
+  terminal `<id>:close` marker and is idempotent. No native changes.
+  See ADR-0011.
+- **Managed state (`state.Store`, T4)**: Tauri-`.manage()` equivalent —
+  one store per `application.App` (`set_state`/`get_state`/`has_state`
+  forwarders). Values are raw JSON strings; typed access is hand-written
+  (`set_string`/`get_string` pattern, `$for` only if proven sufficient).
+  Same threading rule as handlers (main thread; `spawn` workers reply as
+  events). See ADR-0011.
+- **Secure defaults (`webview.default_csp`/`csp_meta`/`inject_csp`, T7)**:
+  every window runs under a default CSP (`default-src 'self'`,
+  `object-src 'none'`, `frame-ancestors 'none'`; inline script+style
+  allowed so single-file frontends keep working). App-supplied CSP meta
+  wins (`inject_csp` is override-respecting + idempotent); hello ships
+  the policy verbatim and its preview fallback is the tested secure mode.
+  See ADR-0012.
+- **Mobile prep (`mobile`, `events.common_*`, M0)**: `mobile.is_mobile()`
+  (`$if android || ios`), `apply_geometry` (intentional desktop no-op;
+  explicit `not implemented (M1/M3)` on mobile targets).
+  `events.common_battery/network/theme/low_memory` (`common:*` names +
+  JSON payload shapes) is the contract future backends feed. See
+  ADR-0012.
 - **Asset (`assets.Server`)**: read-only file provider for the frontend.
-  `content_type(path)` maps extensions to MIME. Prod = embedded bytes,
-  dev = directory served through `veb` with livereload (Phase 3).
+  `content_type(path)` maps extensions to MIME. Prod = embedded bytes
+  (`assets.Bundle`, filled with `$embed_file` by the app), dev =
+  directory reads (`Server.read`); both enforce the same traversal +
+  allowlist checks. Registry-driven entry points `Server.resolve_for` /
+  `Bundle.resolve_for` scope reads to the window's granted roots (no
+  grant = deny); full `veb` dev server with livereload is the remaining
+  Phase 3 work. See ADR-0012.
 - **Service**: a named native capability (`clipboard`, `dialog`, …)
   registered on the `App` by string name. Implementations live in
   `services/` and may be OS-gated.
 - **Binding spec (`generator.MethodSpec`)**: static description of one
   bound method used to emit TypeScript declarations (`generate_dts`).
   Hand-written specs for now; compile-time auto-derivation is Phase 5+.
+- **Config (`config.VailsConfig`, `vails.json`)**: the app's persisted
+  project file (T6): name/version, `windows` list (`WindowConfig` maps
+  1:1 onto `webview.Config` but the caller builds it, so `config`
+  never imports `webview`), `capabilities` (decoded as
+  `CapabilitySpec`, converted via `to_registry()` for
+  `bridge.Router.call_from`), `asset_root`, `bundle` metadata
+  (incl. `windows_dll_side_by_side` from the Phase 1 lesson).
+  `load`/`load_text` + fail-fast `validate()`; `default_config` is the
+  `vails init` scaffold (empty capabilities = deny by default).
+  Enforcement of the stored grants is T2. See ADR-0008.
 - **Capability (`capabilities.Registry`)**: Tauri-style allowlist (T1).
   `Capability{id, windows, commands, asset_roots, platforms}` granted via
   `grant`; `is_allowed(window_label, command)` gates dispatch

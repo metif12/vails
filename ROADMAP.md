@@ -2,6 +2,11 @@
 
  checkboxes = state. Move exactly one phase at a time (see AGENTS.md §3).
 
+Current position (2026-09-27): Phases 0–2 + T1/T6/T2/T3/T4/T7/M0 done
+(plus the Phase 3 pure-V seam); remaining in Phase 3 is the `veb` dev
+server + `vails run` dev mode. Phase 4–7, T5, the M1-M4, C- and
+E-tracks below are planned, not started.
+
 - [x] **Phase 0 — Scaffold** (this repo): `v.mod`, module skeleton,
   `AGENTS.md`/`CONTEXT.md`/`ROADMAP.md`, ADRs, `examples/hello`,
   `v test .` green on Windows.
@@ -19,28 +24,48 @@
   Remaining: Linux C transport wiring (message handler + run_javascript)
   + V→JS event delivery via `webview_eval`.
 - [ ] **Phase 3 — Assets + dev experience**: `assets.Server` prod
-  (`$embed_file`) vs dev (`veb` + browser livereload via
-  `v -d veb_livereload watch run`); `vails run` uses dev mode.
-  This is where Vails beats Wails (sub-second rebuilds).
+  (`Bundle`, filled with `$embed_file` by the app) vs dev (directory
+  reads; `veb` + browser livereload via `v -d veb_livereload watch run`
+  still pending); capability wiring done (`Server.resolve_for` /
+  `Bundle.resolve_for`, no grant = deny — ADR-0012). `vails run` uses
+  dev mode. This is where Vails beats Wails (sub-second rebuilds).
 - [ ] **Phase 4 — CLI**: `vails init/run/build/doctor` + `hello`
   template; `doctor` checks `pkg-config`, webkitgtk, `v --version`.
-- [ ] **Phase 5 — Services**: `dialog` (file open/save), `menu`,
-  `clipboard`, `keychain` (cf. `v3/pkg/services`, `v3/internal/dbus`).
-  One PR per service + Linux manual test.
+- [ ] **Phase 5 — Services** (full catalog below; one PR per service +
+  Linux manual test; each: `services/<name>.v` seam + `_test.v` +
+  capability + ADR line; T5 plugin manifests align here):
+  - S1 core (desktop first): `dialog` → `notification` → `menu` →
+    `tray` (StatusNotifier/AppIndicator — separate from `menu`) →
+    `clipboard` (full: read/write + monitor event) → `opener`
+    (open file/URL in external app) → `os-info` → `window-state` /
+    `positioner` (persist size/position). Cf. `v3/pkg/services`.
+  - S2 system (after S1): `single-instance` → `autostart` →
+    `global-shortcut` (risk: Wayland limits) → `keychain`
+    (cf. `v3/internal/keychain`) → `store` (persisted KV) →
+    `screencapture` (per ADR-0009 B) → `scoped fs` (last, riskiest,
+    capability-locked).
+  - S3 mobile (feeds M2): `haptics` (= `vibrate`), `biometric`,
+    `geolocation`; `barcode-scanner` / `nfc` optional-late.
+  - Out of scope (post-desktop, unchanged): signed `updater`,
+    `sidecar` binaries, unrestricted `shell` / `process`, `sql` /
+    `stronghold`, WebDriver engine, BT/serial/printer (community-level).
 - [ ] **Phase 6 — Cross-platform**: Windows first (WebView2/COM behind
   a C wrapper — V has no COM projection; highest risk), then macOS
   (WKWebView/ObjC). Freeze `application/` + `bridge/` API before starting.
 - [ ] **Phase 7 — Hardening**: `generator` auto-specs via `$for`
   compile-time reflection, app icons/packaging (cf. `v3/internal/packager`,
-  `nfpm`), `doctor-ng` equivalent, docs site.
+  `nfpm`), `doctor-ng` equivalent, docs site (plan parked in
+  `docs/site/PLAN.md`: English LTR, static export to GitHub Pages via
+  `veb` SSG; build starts only after all phases/tracks are done).
 
 ## Tauri-inspired track (approved; runs after Phase 2, interleaved below)
 
 Source: tauri-apps/tauri v2 (111k stars) — same problem space (native
 backend + web frontend, OS webview, no bundling). Adopted: capabilities
 model (full), low-cost/high-impact ideas only. Deferred to post-desktop:
-signed updater, sidecar binaries, mobile, store/SQL/Stronghold, WebDriver
-engine, iframe isolation pattern.
+signed updater, sidecar binaries, SQL/Stronghold, WebDriver
+engine, iframe isolation pattern. (`store` lives in Phase 5 S2, mobile
+has its own track below.)
 
 - [x] **T1 — Capabilities (first; everything else builds on it)** (done 2026-09-26, ADR-0007):
   new `capabilities/` module: `Capability{id, windows []string,
@@ -51,39 +76,49 @@ engine, iframe isolation pattern.
   `unknown method`, to avoid leaking). `assets.Server` gains an allowlist
   of roots (Tauri asset-protocol scope; today only `..` is rejected).
   Tests: allow/deny matrix + platform filtering, pure-V, green on both
-  OSes. Docs: ADR-0006 + CONTEXT.md section.
-- [ ] **T2 — Stricter IPC contract (after T1)**: split command
-  (request/response, cf. Tauri `invoke`) from event (one-way, no reply).
-  `bridge` gains `call_json` validating `params` shape with standard
-  `err` values (Tauri `Result` → promise reject). Document threading rule:
-  handlers run on the webview main thread → must be fast/non-blocking;
-  heavy work via `spawn` + result delivered as event.
-- [ ] **T3 — Light channels for streaming (after T2)**: Tauri
-  `ipc::Channel` equivalent for progress/streaming: channel id (`ch_<n>`),
-  repeated pushes via `to_js`-style eval, explicit close. No native
-  changes — eval only. Contract: `__emit`-compatible, documented in
-  e2e READMEs.
-- [ ] **T4 — Managed state (after T2)**: Tauri `.manage()` equivalent:
-  new `state/` module, one store per App, read/write from inside handlers.
-  V1 with `json` + hand-written typed accessors (V generics are limited);
-  `$for` auto-derivation only if proven sufficient (else stays manual,
-  same rule as generator Phase 7).
+  OSes. Docs: ADR-0007 + CONTEXT.md section.
+- [x] **T2 — Stricter IPC contract (after T1)** (done 2026-09-27, ADR-0010):
+  command (`call_json`: gate → params validation → handler) split from
+  event (`notify`: gate only, no reply; app forwards to its own
+  `events.Bus`). Standard `err` prefixes (`unknown method:`,
+  `forbidden:`, `bad request:`, `bad params:`, `bad event:` → promise
+  reject via `__resolve`); `register_validated` + `validate_empty`;
+  single native entry `handle_envelope_from` (Windows `bind_cb` calls it
+  with label + `Config.registry`); `vails.emit` in both runtimes;
+  `examples/hello` enforces `vails.json` grants. Threading rule
+  documented: handlers on webview main thread → fast/non-blocking,
+  heavy work via `spawn` + result as event. Pure-V, green on Windows.
+- [x] **T3 — Light channels for streaming (after T2)** (done 2026-09-27, ADR-0011):
+  Tauri `ipc::Channel` equivalent: `bridge.ChannelHub.open(event)` mints
+  `ch_<n>` ids (no globals), repeated pushes via `to_js`-style eval
+  snippets on the channel id, idempotent `close_js` (`<id>:close`
+  marker). No native changes — eval only. `__emit`-compatible (frontend
+  uses existing `onEvent`), documented in e2e READMEs.
+- [x] **T4 — Managed state (after T2)** (done 2026-09-27, ADR-0011):
+  Tauri `.manage()` equivalent: new `state/` module (`Store`: raw JSON
+  per key + hand-written `set_string`/`get_string` accessors; `$for`
+  auto-derivation only if proven sufficient), one store per
+  `application.App` (`set_state`/`get_state`/`has_state`, handlers
+  capture `&app`). Threading follows ADR-0010 (main-thread access,
+  `spawn` workers reply as events).
 - [ ] **T5 — Services as plugins (aligns with Phase 5)**: each service
-  (`dialog`, `notification`, scoped `fs`, …) gets a small manifest —
-  name, version, required capabilities, its own JS snippet (no monolithic
-  runtime). `generator` emits `.d.ts` from the manifest. Order:
-  `dialog` → `notification` → scoped `fs` (riskiest, locked by
-  capabilities) → rest.
-- [ ] **T6 — `vails.json` config (aligns with Phase 4 CLI)**: minimal
-  Tauri-`tauri.conf.json` equivalent: windows list (label/title/size),
+  gets a small manifest — name, version, required capabilities, its own
+  JS snippet (no monolithic runtime). `generator` emits `.d.ts` from the
+  manifest. Order follows the Phase 5 catalog: S1 core first (`dialog` →
+  `notification` → …) then S2 (`single-instance` → … → scoped `fs` last,
+  locked by capabilities).
+- [x] **T6 — `vails.json` config (aligns with Phase 4 CLI)** (done 2026-09-26, ADR-0008):
+  minimal Tauri-`tauri.conf.json` equivalent: windows list (label/title/size),
   enabled capabilities, asset roots, bundle settings (icon, name,
   Windows side-by-side DLLs — the pain felt in Phase 1). CLI `run`/`build`
   reads it; `doctor` validates it. Hand-written JSON schema + tests.
-- [ ] **T7 — Secure frontend defaults (with T1, half a day)**: default
-  injected `<meta CSP>` (Tauri CSP); hello's preview fallback documented
-  and tested as the secure mode (no API outside a Vails window).
+- [x] **T7 — Secure frontend defaults (with T1, half a day)** (done 2026-09-27, ADR-0012):
+  default injected `<meta CSP>` (`webview.default_csp`/`csp_meta`/`inject_csp`,
+  app override wins, idempotent; Tauri CSP); hello's preview fallback
+  documented and tested as the secure mode (test fails when hello's meta
+  drifts from `default_csp()`).
 
-Execution order: T1 → T6 → T2 → T3 → T4 → T5. Estimate: ~3 focused weeks.
+Execution order: T1 → T6 → T2 → T3 → T4 → T5 (T1, T6, T2, T3, T4, T7, M0 done; next: Phase 3 `veb` dev server, then Phase 4 CLI, then T5). Estimate: ~3 focused weeks.
 Each item: code + tests on both OSes + short ADR + ROADMAP checkbox.
 
 ## Mobile track (both platforms, plan-only until SDK/macOS exist; ADR-0006)
@@ -94,10 +129,13 @@ no-ops; one `mobile/` entry + platform-neutral `events.Common.*`).
 vab is a helper (NDK flags, keystore/AAB know-how), NOT a dependency:
 Gradle scaffold à la Wails.
 
-- [ ] **M0 — Pure-V prep (zero prerequisites, can start now)**: `mobile/`
-  module with desktop no-op stubs; `capabilities` gains `platforms`
-  (from T1); `events.Common.*` contract (battery/network/theme/low-memory)
-  that future backends will feed. Tests: pure-V, green on Windows/WSL.
+- [x] **M0 — Pure-V prep (zero prerequisites, can start now)** (done 2026-09-27, ADR-0012):
+  `mobile/` module with desktop no-op stubs (`is_mobile` via
+  `$if android || ios`, `apply_geometry` intentional desktop no-op);
+  `capabilities` `platforms` already from T1 (no changes needed);
+  `events.Common.*` contract (`common:battery/network/theme/low-memory`
+  + JSON payload shapes) that future backends will feed. Tests: pure-V,
+  green on Windows/WSL.
 - [ ] **M1 — Android PoC (needs SDK/NDK/JDK on this Windows machine)**:
   Gradle template (`MainActivity` + WebView + asset loader +
   `VailsBridge`/`VailsJSBridge`); V as shared lib with JNI exports —
@@ -106,9 +144,10 @@ Gradle scaffold à la Wails.
   (`Router.handle_message` for the array-wrapped JS→V shape from ADR-0005,
   `evaluateJavascript` for V→JS). Done when hello+ping runs on the
   emulator (`chrome://inspect`).
-- [ ] **M2 — Android services**: toast → vibrate → clipboard → share-sheet
-  → device-info → system events into `Common.*`; one capability each (T1);
-  manifest permissions documented per service.
+- [ ] **M2 — Android services**: toast → vibrate/haptics → clipboard →
+  share-sheet → device-info → biometric → geolocation → system events
+  into `Common.*`; one capability each (T1); manifest permissions
+  documented per service.
 - [ ] **M3 — iOS scaffold (no verify here; needs a Mac)**: Xcode template
   (`.app`, `Info.plist`, `main.m` with `UIApplicationMain` + `WKWebView` +
   `wails://` scheme + `messageHandlers` — the ADR-0004 raw path),
@@ -120,6 +159,61 @@ Gradle scaffold à la Wails.
 
 Risks: V-JNI unproven (M1 spike first); M3 untestable locally; heavy
 environment (several GB SDK + emulator) — hence M0 decoupled.
+
+## Bundled Chromium track (opt-in CEF backend; runs last, after Phase 7 + mobile)
+
+Goal: guaranteed rendering consistency across OSes for apps that opt in.
+Stays opt-in forever: OS webview (WebView2/WebKitGTK) is the default;
+`backend: 'chromium'` (per window, in `vails.json` + `webview.Config`)
+selects the bundled engine. `vails build` keeps both flavors (lean + bundled,
+~120–200MB extra for CEF). Electron's fork is NOT used (no stable embed API,
+drags in Node — decided in the planned CEF ADR, next number 0013); CEF pinned to an upstream
+Chromium gives the same rendering without the fork patches.
+
+- [ ] **C0 — CEF spike (gates everything)**: throwaway C99 shim over CEF
+  (`init`/`create_window`/`load_html`/`bind`/`eval`/`run_loop`, same pattern
+  as `webview_shim.h`), window + `ping→pong` through the unchanged
+  `bridge.Router` seam, DLL/`.so` + size inventory, `-gc none` check on
+  Linux. Park or delete spike code; no schema changes yet.
+- [ ] **C1 — Pure-V seam**: `webview.Config.backend` (`os_webview` default,
+   `chromium` opt-in) + `validate()` stub error until C2; `WindowConfig.backend`
+   string (`'os'` default, additive) with caller-side mapping; tests pure-V,
+   green on Windows; `CONTEXT.md` line + ADR-0013 (planned CEF decision).
+- [ ] **C2 — CEF backends behind the facade**: `cef_shim.h` + thin
+  `webview_cef_windows.c.v` / `webview_cef_linux.c.v` (`run_chromium_*`,
+  dispatched from `webview.run`); bridge protocol reused as-is
+  (`handle_message`, `resolve_js`/`to_js`); missing CEF runtime fails fast
+  with a `doctor` hint. Manual screenshot proofs on both OSes.
+- [ ] **C3 — CLI + packaging**: `doctor` probes CEF
+  (`VAILS_CEF_ROOT`/`./cef/`, version + `resources/` + subprocess helper);
+  `build [--flavor lean|bundled|both]` stages CEF next to the exe;
+  `BundleConfig` gains additive `chromium_version` (+ Electron-parity note);
+  `init` documents the `"backend": "chromium"` sample.
+- [ ] **C4 — Verify + close**: `v fmt -w .`, `v test .` green on Windows;
+  hello with `"backend": "chromium"` renders + `ping→pong` on Win/Linux;
+  lean vs bundled sizes recorded; e2e READMEs updated.
+
+Order: C0 → C1 → C2 → C3 → C4, after all phases/tracks above.
+Each item: code + tests on both OSes + short ADR update + checkbox.
+
+## Examples track (vanilla, no UI framework)
+
+Bar: system type scale, spacing rhythm, `focus-visible`,
+light+dark via `prefers-color-scheme`, LTR English. Each example:
+`main.v` + `vails.json` minimal grants + `frontend/` + preview fallback
+(runs outside a Vails window, like hello) + e2e README lines.
+No example starts before the service it needs.
+
+- [ ] **E0 — Conventions** (once, before any app example)
+- [ ] **E1 — todo** (after T4; later persisted via `store`)
+- [ ] **E2 — pomodoro** (after `notification` S1; live tick via T3 channel)
+- [ ] **E3 — clipboard-notes** (after full `clipboard`)
+- [ ] **E4 — files-mini** (after `dialog` + `scoped fs`)
+- [ ] **E5 — capture-demo** (after `screencapture`)
+- [ ] **E6 — settings** (after `window-state` + `store`)
+
+CLI templates (`init --template todo|pomodoro`) land in Phase 4/7,
+not before.
 
 ## Out of scope
 

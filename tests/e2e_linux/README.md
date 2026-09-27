@@ -37,3 +37,18 @@ v run ./examples/hello
 #     Router.handle_message -> run_javascript(__resolve(...)))
 # 3. evaluate events.to_js('ready', 'hi') -> status becomes "event: hi"
 ```
+
+## T3 channels / T4 state / T7 CSP (pure-V, verified via `v test .`)
+
+- Channels (`bridge.ChannelHub`, ADR-0011): no native changes — the V
+  side evaluates `push_js`/`close_js` snippets via run_javascript and
+  the frontend subscribes with the existing
+  `window.vails.onEvent('ch_<n>', cb)`. Manual check: open a channel in
+  a handler, evaluate two pushes + close, confirm ordered delivery and
+  the `<id>:close` marker.
+- State (`state.Store`, ADR-0011): same-thread handler access only;
+  `spawn` workers must deliver results as events (ADR-0010 rule).
+- CSP (T7, ADR-0012): hello ships `webview.default_csp()` verbatim;
+  confirm DevTools shows no CSP violations on load and the preview
+  fallback (file:// open of `frontend/index.html`) renders with the
+  counter running locally.
