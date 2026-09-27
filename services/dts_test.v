@@ -41,10 +41,23 @@ fn test_dts_emits_namespace_per_service() {
 
 fn test_dts_declares_the_runtime_shape() {
 	out := dts([demo()])
-	assert out.contains('export namespace demo_runtime {')
 	assert out.contains('export const service: string;')
 	assert out.contains('export const version: string;')
-	assert out.contains('export function run(params: { value: number }): Promise<string>;')
+	// one namespace per service, not one per service+runtime
+	assert out.split('export namespace').len == 2
+}
+
+fn test_dts_includes_manifest_types_first() {
+	typed := Service{
+		name:     'typed'
+		version:  '0.1.0'
+		commands: [Command{ name: 'typed.get', result: 'Typed' }]
+		ts_types: ['\texport interface Typed { value: string; }']
+	}
+	out := dts([typed])
+	assert out.contains('export interface Typed { value: string; }')
+	// the interface must come before the function that returns it
+	assert (out.index('interface Typed') or { -1 }) < (out.index('Promise<Typed>') or { -1 })
 }
 
 fn test_dts_of_nothing_is_empty() {

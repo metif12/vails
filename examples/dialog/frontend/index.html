@@ -1,0 +1,333 @@
+<!doctype html>
+<!-- Source of truth for the dialog demo UI: main.v loads this file at runtime.
+     Conventions (E0): system type scale, 4px spacing rhythm, focus-visible on every
+     control, light + dark via prefers-color-scheme, LTR English, one column. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- Default Vails CSP (mirrors webview.default_csp() - kept in sync by webview/secure_test.v).
+     Preview fallback (opened outside a Vails window) runs under the same policy. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
+<title>Vails Dialog Demo</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --text: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --accent: #4338ca;
+    --accent-text: #ffffff;
+    --focus: #4338ca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1120;
+      --surface: #111827;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --line: #1f2937;
+      --accent: #818cf8;
+      --accent-text: #0b1120;
+      --focus: #a5b4fc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  main {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  header { display: flex; flex-direction: column; gap: 0.25rem; }
+  h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.01em; }
+  h2 { margin: 0; font-size: 1rem; }
+  .subtitle { margin: 0; color: var(--muted); font-size: 0.875rem; }
+  section {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  button {
+    font: inherit;
+    font-size: 0.9375rem;
+    padding: 0.5rem 0.875rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  .primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+  }
+  .primary:hover:not(:disabled) { filter: brightness(1.08); }
+  output {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.8125rem;
+    color: var(--muted);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    min-height: 2.5rem;
+    word-break: break-all;
+  }
+  output:empty::before { content: "no result yet"; color: var(--muted); }
+  .paths { margin: 0; padding-left: 1.125rem; font-size: 0.8125rem; }
+  .paths li { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .note { margin: 0; font-size: 0.8125rem; color: var(--muted); }
+  dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; font-size: 0.875rem; }
+  dl.facts dt { color: var(--muted); }
+  dl.facts dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Vails Dialog Demo</h1>
+    <p class="subtitle">Two services, one window: <code>dialog</code> (native pickers) and <code>os_info</code>.</p>
+  </header>
+
+  <section>
+    <h2>File dialogs</h2>
+    <div class="row">
+      <button class="primary" id="open" type="button">Open file&hellip;</button>
+      <button id="open-multi" type="button">Open several&hellip;</button>
+      <button id="save" type="button">Save as&hellip;</button>
+    </div>
+    <ul class="paths" id="paths"></ul>
+    <output id="open-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>Message box</h2>
+    <div class="row">
+      <button id="message" type="button">Ask&hellip;</button>
+      <button id="confirm" type="button">Confirm&hellip;</button>
+    </div>
+    <output id="message-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>os_info service</h2>
+    <div class="row">
+      <button id="host" type="button">Read host info</button>
+    </div>
+    <dl class="facts" id="facts"></dl>
+    <output id="host-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>Capability gate</h2>
+    <div class="row">
+      <button id="forbidden" type="button">Call an ungranted command</button>
+    </div>
+    <p class="note">A command that <code>vails.json</code> does not grant is rejected with <code>forbidden: &hellip;</code> &mdash; the method name is never confirmed.</p>
+    <output id="forbidden-status" role="status"></output>
+  </section>
+</main>
+<script>
+(function () {
+  "use strict";
+  // --- vails dts --js output, inlined -------------------------------------
+  // `vails dts --js` writes this snippet to frontend/vails-services.js. It
+  // is inlined here because the example loads the page from memory
+  // (webview set_html), where a relative <script src> has no base URL to
+  // resolve against. Real projects can load the file instead.
+  var v = window.vails = window.vails || {};
+  var ns = v.dialog = v.dialog || {};
+  ns.open = function (params) { return v.call("dialog.open", params || ""); };
+  ns.save = function (params) { return v.call("dialog.save", params || ""); };
+  ns.message = function (params) { return v.call("dialog.message", params || ""); };
+  var nsInfo = v.os_info = v.os_info || {};
+  nsInfo.get = function (params) { return v.call("os_info.get", params || ""); };
+  // --- end vails dts --js output -----------------------------------------
+
+  var hasBackend = typeof window.vails.call === "function";
+  var openBtn = document.getElementById("open");
+  var multiBtn = document.getElementById("open-multi");
+  var saveBtn = document.getElementById("save");
+  var messageBtn = document.getElementById("message");
+  var confirmBtn = document.getElementById("confirm");
+  var hostBtn = document.getElementById("host");
+  var forbiddenBtn = document.getElementById("forbidden");
+  var pathsEl = document.getElementById("paths");
+  var openStatus = document.getElementById("open-status");
+  var messageStatus = document.getElementById("message-status");
+  var hostStatus = document.getElementById("host-status");
+  var forbiddenStatus = document.getElementById("forbidden-status");
+  var factsEl = document.getElementById("facts");
+
+  // The dialog service blocks the UI while the native picker is open, so
+  // its buttons disable themselves around the call and always re-enable.
+  function withBusy(btn, fn) {
+    btn.disabled = true;
+    return fn().then(function (r) { btn.disabled = false; return r; },
+                      function (e) { btn.disabled = false; throw e; });
+  }
+
+  function setStatus(el, text) { el.textContent = text; }
+
+  function showPaths(paths) {
+    pathsEl.textContent = "";
+    (paths || []).forEach(function (p) {
+      var li = document.createElement("li");
+      li.textContent = p;
+      pathsEl.appendChild(li);
+    });
+  }
+
+  function showFacts(info) {
+    factsEl.textContent = "";
+    ["os", "arch", "hostname", "cwd", "cpus"].forEach(function (key) {
+      var dt = document.createElement("dt");
+      dt.textContent = key;
+      var dd = document.createElement("dd");
+      dd.textContent = String(info[key] === undefined ? "?" : info[key]);
+      factsEl.appendChild(dt);
+      factsEl.appendChild(dd);
+    });
+  }
+
+  if (!hasBackend) {
+    // Preview fallback: the page still renders and explains itself outside
+    // a Vails window (no window.vails), same as examples/hello.
+    setStatus(openStatus, "preview mode: run the app binary to open native dialogs");
+    setStatus(messageStatus, "preview mode: message boxes need the backend");
+    setStatus(hostStatus, "preview mode: host info needs the backend");
+    setStatus(forbiddenStatus, "preview mode: capability checks need the backend");
+    [openBtn, multiBtn, saveBtn, messageBtn, confirmBtn, hostBtn, forbiddenBtn].forEach(function (b) {
+      b.disabled = true;
+    });
+    return;
+  }
+
+  var dialog = window.vails.dialog;
+
+  // The E2E probe (VAILS_DIALOG_PROBE in main.v) resolves into this event
+  // instead of a click, so a screenshot can prove the loop.
+  window.vails.onEvent("probe:done", function (raw) {
+    var res = raw;
+    try { res = JSON.parse(raw); } catch (e) { /* already a string */ }
+    setStatus(openStatus, "probe: " + (res && res.canceled ? "canceled" : JSON.stringify(res)));
+  });
+
+  openBtn.addEventListener("click", function () {
+    withBusy(openBtn, function () {
+      return dialog.open({ title: "Open a file", filters: [
+        { name: "Text", extensions: "txt,md" },
+        { name: "All files", extensions: "all" }
+      ] });
+    }).then(function (raw) {
+      // The service resolves with JSON text (the bridge is string-typed).
+      var res = typeof raw === "string" ? JSON.parse(raw) : raw;
+      showPaths(res.paths);
+      setStatus(openStatus, res.canceled ? "canceled" : res.paths.length + " path(s)");
+    }).catch(function (e) {
+      setStatus(openStatus, "error: " + (e && e.message ? e.message : e));
+    });
+  });
+
+  multiBtn.addEventListener("click", function () {
+    withBusy(multiBtn, function () {
+      return dialog.open({ title: "Open several files", multi: true });
+    }).then(function (raw) {
+      var res = typeof raw === "string" ? JSON.parse(raw) : raw;
+      showPaths(res.paths);
+      setStatus(openStatus, res.canceled ? "canceled" : res.paths.length + " path(s)");
+    }).catch(function (e) {
+      setStatus(openStatus, "error: " + (e && e.message ? e.message : e));
+    });
+  });
+
+  saveBtn.addEventListener("click", function () {
+    withBusy(saveBtn, function () {
+      return dialog.save({ title: "Save as", defaultName: "notes.txt" });
+    }).then(function (raw) {
+      var res = typeof raw === "string" ? JSON.parse(raw) : raw;
+      showPaths(res.paths);
+      setStatus(openStatus, res.canceled ? "canceled" : "ready to write: " + (res.paths[0] || ""));
+    }).catch(function (e) {
+      setStatus(openStatus, "error: " + (e && e.message ? e.message : e));
+    });
+  });
+
+  messageBtn.addEventListener("click", function () {
+    withBusy(messageBtn, function () {
+      return dialog.message({ title: "Vails", message: "Hello from the dialog service." });
+    }).then(function (raw) {
+      var res = typeof raw === "string" ? JSON.parse(raw) : raw;
+      setStatus(messageStatus, "button: " + res.button + (res.canceled ? " (canceled)" : ""));
+    }).catch(function (e) {
+      setStatus(messageStatus, "error: " + (e && e.message ? e.message : e));
+    });
+  });
+
+  confirmBtn.addEventListener("click", function () {
+    withBusy(confirmBtn, function () {
+      return dialog.message({
+        title: "Vails",
+        message: "Delete everything? This only demonstrates a yes/no/cancel box.",
+        buttons: "yesnocancel"
+      });
+    }).then(function (raw) {
+      var res = typeof raw === "string" ? JSON.parse(raw) : raw;
+      setStatus(messageStatus, "button: " + res.button);
+    }).catch(function (e) {
+      setStatus(messageStatus, "error: " + (e && e.message ? e.message : e));
+    });
+  });
+
+  hostBtn.addEventListener("click", function () {
+    withBusy(hostBtn, function () {
+      return window.vails.os_info.get();
+    }).then(function (raw) {
+      var info = typeof raw === "string" ? JSON.parse(raw) : raw;
+      showFacts(info);
+      setStatus(hostStatus, "os_info.get resolved");
+    }).catch(function (e) {
+      setStatus(hostStatus, "error: " + (e && e.message ? e.message : e));
+    });
+  });
+
+  forbiddenBtn.addEventListener("click", function () {
+    window.vails.call("app.not_granted").then(function () {
+      setStatus(forbiddenStatus, "unexpectedly allowed");
+    }).catch(function (e) {
+      setStatus(forbiddenStatus, "rejected: " + (e && e.message ? e.message : e));
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -28,10 +28,10 @@ pub const kind_open = 'open'
 pub const kind_save = 'save'
 pub const kind_message = 'message'
 
-// Message-box button sets.
-pub const buttons_ok = 0
-pub const buttons_ok_cancel = 1
-pub const buttons_yes_no_cancel = 2
+// Message-box button sets, as the frontend spells them.
+pub const buttons_ok = 'ok'
+pub const buttons_ok_cancel = 'okcancel'
+pub const buttons_yes_no_cancel = 'yesnocancel'
 
 // Hard limits. Options come from JS, so every string is bounded before it
 // reaches a fixed-size native buffer; the numbers are deliberately
@@ -59,7 +59,7 @@ pub mut:
 	kind         string
 	title        string
 	message      string
-	buttons      int = buttons_ok
+	buttons      string = buttons_ok
 	default_path string
 	default_name string
 	filters      []Filter
@@ -119,8 +119,8 @@ pub fn (o Options) validate(want string) ! {
 	if o.default_path.len > max_path || o.default_name.len > max_path {
 		return error('dialog: path hint is longer than ' + max_path.str() + ' characters')
 	}
-	if o.buttons < buttons_ok || o.buttons > buttons_yes_no_cancel {
-		return error('dialog: buttons must be 0 (ok), 1 (okcancel) or 2 (yesnocancel)')
+	if !is_button_set(o.buttons) {
+		return error('dialog: buttons must be ok, okcancel or yesnocancel')
 	}
 	if o.kind == kind_message {
 		if o.message == '' {
@@ -171,6 +171,11 @@ pub fn validate_filter(f Filter) ! {
 			}
 		}
 	}
+}
+
+// is_button_set accepts the empty string as the default (ok).
+pub fn is_button_set(s string) bool {
+	return s == '' || s == buttons_ok || s == buttons_ok_cancel || s == buttons_yes_no_cancel
 }
 
 // native_filter_string renders the filters in the Windows convention the

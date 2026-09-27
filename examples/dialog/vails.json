@@ -1,0 +1,41 @@
+{
+	"name": "Vails Dialog Demo",
+	"version": "0.1.0",
+	"asset_root": "frontend",
+	"windows": [
+		{
+			"label": "main",
+			"title": "Vails Dialog Demo",
+			"width": 900,
+			"height": 640
+		}
+	],
+	"capabilities": [
+		{
+			"id": "dialogs",
+			"windows": ["main"],
+			"commands": ["dialog.open", "dialog.save", "dialog.message"],
+			"asset_roots": ["frontend"],
+			"platforms": []
+		},
+		{
+			"id": "host-info",
+			"windows": ["main"],
+			"commands": ["os_info.get"],
+			"asset_roots": [],
+			"platforms": []
+		},
+		{
+			"id": "denied-demo",
+			"windows": ["main"],
+			"commands": ["app.not_granted"],
+			"asset_roots": [],
+			"platforms": []
+		}
+	],
+	"bundle": {
+		"name": "Vails Dialog Demo",
+		"icon": "",
+		"windows_dll_side_by_side": true
+	}
+}

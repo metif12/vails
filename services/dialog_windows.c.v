@@ -59,6 +59,24 @@ fn with_buffer(native_call BufferCall) !Result {
 	return dialog_rc(rc, buf.bytestr())
 }
 
+// button_flags maps the frontend's button-set names to the shim's numeric
+// contract (0 = ok, 1 = okcancel, 2 = yesnocancel). The mapping lives in
+// both backends: it is the only place the wire values become platform
+// numbers.
+fn button_flags(buttons string) int {
+	match buttons {
+		buttons_ok_cancel {
+			return 1
+		}
+		buttons_yes_no_cancel {
+			return 2
+		}
+		else {
+			return 0
+		}
+	}
+}
+
 fn open_native(ctx webview.Ctx, opts Options) !Result {
 	// Parent the picker to the webview window so it opens in front of the
 	// app; a nil handle is acceptable (the OS centers it), not fatal.
@@ -86,7 +104,8 @@ fn save_native(ctx webview.Ctx, opts Options) !Result {
 
 fn message_native(ctx webview.Ctx, opts Options) !Result {
 	parent := if ctx.has_parent() { ctx.parent } else { unsafe { nil } }
-	rc := unsafe { C.vails_dialog_message(parent, opts.title.str, opts.message.str, opts.buttons) }
+	buttons := button_flags(opts.buttons)
+	rc := unsafe { C.vails_dialog_message(parent, opts.title.str, opts.message.str, buttons) }
 	if rc < 0 {
 		return error('dialog: message box failed')
 	}

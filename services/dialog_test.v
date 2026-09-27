@@ -92,7 +92,7 @@ fn test_message_requires_text() {
 }
 
 fn test_message_accepts_buttons() {
-	opts := parse_options(kind_message, '{"message":"ok?","buttons":2}') or {
+	opts := parse_options(kind_message, '{"message":"ok?","buttons":"yesnocancel"}') or {
 		panic(err.msg())
 	}
 	assert opts.buttons == buttons_yes_no_cancel
@@ -100,7 +100,9 @@ fn test_message_accepts_buttons() {
 
 fn test_message_rejects_unknown_buttons() {
 	mut failed := ''
-	parse_options(kind_message, '{"message":"x","buttons":9}') or { failed = err.msg() }
+	parse_options(kind_message, '{"message":"x","buttons":"maybe"}') or {
+		failed = err.msg()
+	}
 	assert failed.contains('buttons must be')
 }
 

@@ -11,7 +11,8 @@ module services
 import generator
 
 // specs converts the manifest's commands into generator.MethodSpec, the
-// shared shape the .d.ts emitter already understands.
+// shared shape the .d.ts emitter already understands. Kept so a service
+// (or a tool) can hand its commands to generator.generate_dts directly.
 pub fn (s Service) specs() []generator.MethodSpec {
 	mut out := []generator.MethodSpec{}
 	for c in s.commands {
@@ -26,14 +27,17 @@ pub fn (s Service) specs() []generator.MethodSpec {
 }
 
 // dts renders one `export namespace <service> { … }` block per service:
-// the manifest's TypeScript declarations, then the promise-returning
-// function per command. The runtime part declares the window.vails shape
-// the JS snippet installs, so `window.vails.dialog.open` type-checks.
+// the manifest's TypeScript declarations first, then the promise-returning
+// function per command. The names are the short ones the per-service JS
+// snippet installs on window.vails, so a frontend type-checks the same
+// shape it calls at runtime.
 pub fn dts(svcs []Service) string {
 	mut out := ''
 	for s in svcs {
-		out += generator.generate_dts(s.name, s.specs())
-		out += 'export namespace ' + s.name + '_runtime {\n'
+		out += 'export namespace ' + s.name + ' {\n'
+		for t in s.ts_types {
+			out += t + '\n'
+		}
 		out += '\texport const service: string;\n'
 		out += '\texport const version: string;\n'
 		for c in s.commands {

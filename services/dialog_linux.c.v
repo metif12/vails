@@ -18,6 +18,22 @@ module services
 
 import webview
 
+// button_flags mirrors the Windows mapping so both backends agree on what
+// the frontend's button-set names mean.
+fn button_flags(buttons string) int {
+	match buttons {
+		buttons_ok_cancel {
+			return 1
+		}
+		buttons_yes_no_cancel {
+			return 2
+		}
+		else {
+			return 0
+		}
+	}
+}
+
 fn open_native(_ctx webview.Ctx, _opts Options) !Result {
 	return error('dialog.open: not implemented on linux yet (Phase 5b — needs a Linux toolchain; see tests/e2e_linux/README.md)')
 }

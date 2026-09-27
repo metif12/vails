@@ -70,11 +70,15 @@ fn bind_cb(id &char, req &char, arg voidptr) {
 // eval_sink builds the Ctx.eval_fn for this window: webview_eval runs the
 // snippet on the thread that owns the webview (the thread webview_run
 // blocks on), which is the main thread the handlers run on (ADR-0010).
-// The closure is only ever called from V, never handed to C.
+// The closure is only ever called from V, never handed to C. A non-OK
+// webview_error_t becomes a V error instead of silence, so a service that
+// pushes an event can find out it did not arrive.
 fn eval_sink(w voidptr) fn (js string) ! {
 	return fn [w] (js string) ! {
-		unsafe {
-			C.webview_eval(w, js.str)
+		rc := unsafe { C.webview_eval(w, js.str) }
+		// 0 == WEBVIEW_ERROR_OK, 4 == WEBVIEW_ERROR_INVALID_STATE
+		if rc != 0 {
+			return error('vails: webview_eval failed (code ' + rc.str() + ')')
 		}
 	}
 }
