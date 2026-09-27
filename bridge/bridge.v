@@ -109,6 +109,14 @@ pub fn validate_empty(params string) !void {
 	return error('expected no params')
 }
 
+// validate_any accepts any params payload. It is the default for commands
+// that do declare arguments: the handler owns their shape check, and a
+// wrong payload surfaces as the handler's own error (a service decodes
+// its params with json2 and returns a readable message).
+pub fn validate_any(params string) !void {
+	_ = params
+}
+
 // call_from is the capability-checked dispatch (T1). The window_label is
 // the webview.Config.label of the calling window. Denied calls return
 // 'forbidden: …' (never 'unknown method') so ungranted method names do
