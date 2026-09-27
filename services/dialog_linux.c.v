@@ -1,12 +1,19 @@
 // dialog_linux.c.v - Linux backend of the dialog service.
 //
-// STUB (Phase 5 S1 wave 1, ADR-0014): this machine has no WSL/Linux V, so
-// the GTK chooser is deliberately not written blind - an uncompiled C file
-// is a liability, not progress (AGENTS.md §4: write the pure-V seam first
-// and stub the native side with 'not implemented on …').
+// STUB (Phase 5 S1 wave 1, ADR-0014): this file was written before a Linux
+// toolchain existed on the dev machine, so the GTK chooser was deliberately
+// not written blind - an uncompiled C file is a liability, not progress
+// (AGENTS.md §4: write the pure-V seam first and stub the native side with
+// 'not implemented on …').
 //
-// What the implementation has to do when Linux is available (see
-// tests/e2e_linux/README.md for the manual test):
+// That reason has expired: the WSL image now has V (/root/vsrc/v), GTK 3.24
+// and webkit2gtk-4.1, so this file can be compiled and proven (see the
+// checklist in tests/e2e_linux/README.md). It is still a stub because the
+// GTK chooser is the last S1 item that needs a human answering a modal
+// window, and it is scheduled after clipboard/notification in Phase 5b.
+//
+// What the implementation has to do (see tests/e2e_linux/README.md for the
+// manual test):
 //   - parent the GtkFileChooserDialog to Ctx.parent (the GdkWindow);
 //   - run it from the GTK main loop. The handler already runs on that
 //     loop, but gtk_dialog_run() spins a nested loop, which is the reason

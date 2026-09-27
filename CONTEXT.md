@@ -132,7 +132,23 @@ to stay consistent across sessions.
   `{canceled, paths, button}` — a dismissal is a *result*, not an error.
   Windows: Common Item Dialog + `MessageBoxW` behind `dialog_shim.h`
   (UTF-8 C ABI, NUL-separated paths; V has no COM projection). Linux: an
-  explicit stub until a Linux toolchain exists. See ADR-0014.
+  explicit stub until Phase 5b (the toolchain now exists; the GTK chooser is
+  the last S1 item that needs a human answering a modal window). See
+  ADR-0014/0015.
+- **Clipboard service (`services/clipboard`)**: the system clipboard as text
+  (`clipboard.read_text` → `string`, `clipboard.write_text` → `string`).
+  Params are raw JSON, so a frontend writes
+  `vails.clipboard.write_text(JSON.stringify(text))`; the payload is bounded
+  at 1 MiB and a non-string payload is `bad params:`. A clipboard holding no
+  text is a *result* (`""`), not an error. Reading needs no window handle;
+  writing needs `Ctx.parent` (`require_parent`), because `EmptyClipboard`
+  makes the opening window the clipboard owner — a rule kept in pure V so it
+  is testable. Windows: user32 `CF_UNICODETEXT` with the UTF-8→UTF-16
+  conversion into a `GMEM_MOVEABLE` block the clipboard takes over (V has no
+  COM here, so no shim). Linux: the GTK clipboard. Both backends are reached
+  through `read_text_native`/`write_text_native`; `v test` never calls them
+  (the clipboard is shared machine state) — the round trip is proven by
+  `examples/services`. See ADR-0015.
 - **os-info service (`services.os_info`)**: host facts only (`os_info.get`
   → os, arch, hostname, cwd, home, temp, exe, cpus). The reference
   service with no native half; capability-gated like everything else.

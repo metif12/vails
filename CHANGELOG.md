@@ -20,7 +20,19 @@ Conventions for this file:
 
 ### Added
 
-- Nothing yet.
+- **Windows + Linux backends**: the WSL image has V (`/root/vsrc/v`), GTK 3.24
+  and webkit2gtk-4.1, so a Linux service backend is compiled and proven again
+  instead of stubbed. See ADR-0015.
+
+### Changed
+
+- **`clipboard` got its native half** and is a catalog service now, so
+  `vails dts` and `vails doctor` see it. `clipboard.read_text` /
+  `clipboard.write_text` work on Windows (user32 `CF_UNICODETEXT`) and Linux
+  (the GTK clipboard); an empty clipboard resolves with `""` rather than
+  rejecting, and the payload is bounded at 1 MiB. `read_text`/`write_text` now
+  take the window's `webview.Ctx` (writing needs the parent handle), which is a
+  signature change to a service that had no native half yet. See ADR-0015.
 
 ## [0.2.0] - 2026-09-27
 
