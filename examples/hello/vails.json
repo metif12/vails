@@ -1,0 +1,27 @@
+{
+	"name": "Hello Vails",
+	"version": "0.1.0",
+	"asset_root": "frontend",
+	"windows": [
+		{
+			"label": "main",
+			"title": "Hello Vails",
+			"width": 1024,
+			"height": 768
+		}
+	],
+	"capabilities": [
+		{
+			"id": "main-app",
+			"windows": ["main"],
+			"commands": ["ping", "counter_get", "counter_inc", "counter_dec", "counter_reset"],
+			"asset_roots": ["frontend"],
+			"platforms": []
+		}
+	],
+	"bundle": {
+		"name": "Hello Vails",
+		"icon": "",
+		"windows_dll_side_by_side": true
+	}
+}
