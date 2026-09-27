@@ -22,6 +22,7 @@ pub fn manifests() []Service {
 	return [
 		dialog_manifest(),
 		clipboard_manifest(),
+		opener_manifest(),
 		os_info_manifest(),
 	]
 }

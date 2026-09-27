@@ -114,13 +114,15 @@ fn test_granted_commands_dedupes() {
 // exactly: a service that is added to the catalog without a manifest test
 // here is a service nobody looked at.
 fn test_catalog_wrappers_see_the_built_in_services() {
-	assert manifests().len == 3
+	assert manifests().len == 4
 	assert (find('dialog') or { panic('missing') }).name == 'dialog'
 	assert (find('os_info') or { panic('missing') }).name == 'os_info'
 	assert (find('clipboard') or { panic('missing') }).name == 'clipboard'
+	assert (find('opener') or { panic('missing') }).name == 'opener'
 	assert service_of('dialog.open') != none
 	assert service_of('os_info.get') != none
 	assert service_of('clipboard.read_text') != none
+	assert service_of('opener.open_url') != none
 	// a name nothing provides is reported, not silently ignored
 	svcs, unknown := select_for(['dialog.open', 'ping'])
 	assert svcs.len == 1

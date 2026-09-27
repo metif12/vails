@@ -152,6 +152,21 @@ to stay consistent across sessions.
 - **os-info service (`services.os_info`)**: host facts only (`os_info.get`
   → os, arch, hostname, cwd, home, temp, exe, cpus). The reference
   service with no native half; capability-gated like everything else.
+- **Opener service (`services/opener`)**: hand a URL or a local path to the
+  user's default handler (`opener.open_url` → `string`,
+  `opener.open_path` → `string`). It is the one service whose job is making
+  the OS act on a frontend string, so its validation *is* the security
+  boundary: `open_url` accepts only `http`/`https`/`mailto`/`tel`
+  (`url_scheme`, and a scheme needs ≥2 chars so `C:\notes.txt` is a path and
+  not the scheme "c"), `open_path` accepts only a non-empty local path with
+  no `://` and no NUL. Both wrap a rejection in `bad params:` from inside the
+  service, so the wire contract is the same whether a command is reached
+  through the router or called directly. Windows: `ShellExecuteW` (verb
+  `open`; `with` is the program, the path its parameter). Linux: GIO's
+  `g_app_info_launch_default_for_uri` after
+  `g_canonicalize_filename` + `g_filename_to_uri` — no `xdg-open` process,
+  and `with` is refused with a readable error because the desktop resolves
+  the application itself. See ADR-0015.
 - **Binding spec (`generator.MethodSpec`)**: static description of one
   bound method used to emit TypeScript declarations (`generate_dts`).
   Hand-written specs for now; compile-time auto-derivation is Phase 7.

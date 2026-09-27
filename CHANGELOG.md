@@ -33,6 +33,16 @@ Conventions for this file:
   rejecting, and the payload is bounded at 1 MiB. `read_text`/`write_text` now
   take the window's `webview.Ctx` (writing needs the parent handle), which is a
   signature change to a service that had no native half yet. See ADR-0015.
+- **`opener`**: `opener.open_url` and `opener.open_path` hand a URL or a path
+  to the user's default handler — `ShellExecuteW` on Windows, GIO's
+  `g_app_info_launch_default_for_uri` on Linux (no `xdg-open` process
+  involved). `open_url` accepts only `http`, `https`, `mailto` and `tel`, and
+  `open_path` only a local path, so a granted capability cannot be turned into
+  a `file://` read or a `smb:` launch. `with` (an application override) is
+  Windows-only for now and says so on Linux. See ADR-0015.
+- `v test .` now passes on **Linux** as well as Windows (26 test files). It
+  never did: `dialog_test.v` referenced a Windows-only helper, which moved to
+  pure V so the mapping is testable everywhere.
 
 ## [0.2.0] - 2026-09-27
 
