@@ -34,13 +34,18 @@ fn C.webview_init(w voidptr, js &char) int
 fn C.vails_webview_bind(w voidptr, name &char, f voidptr, arg voidptr) int
 fn C.webview_return(w voidptr, id &char, status int, result &char) int
 fn C.webview_eval(w voidptr, js &char) int
+// HWND of the window the library created/owns (webview 0.12): services
+// parent their own native UI (dialogs, menus) to it. NULL-parented calls
+// still work, so this is a convenience, not a requirement.
+fn C.webview_get_window(w voidptr) voidptr
 
-// Ctx crosses the C boundary as webview_bind's arg so bind_cb can reach
+// BindCtx crosses the C boundary as webview_bind's arg so bind_cb can reach
 // the instance (for webview_return), our Router and the T2 dispatch
 // context (window label + capability registry). Heap-allocated, freed
 // after webview_run returns. C never dereferences it — it only ferries
 // the pointer back to bind_cb — so V-managed fields are safe here.
-struct Ctx {
+// (Named BindCtx, not Ctx: Ctx is the window runtime handle services use.)
+struct BindCtx {
 	w      voidptr
 	router &bridge.Router
 	label  string
@@ -55,10 +60,22 @@ struct Ctx {
 // for events (see bridge.handle_envelope_from).
 fn bind_cb(id &char, req &char, arg voidptr) {
 	unsafe {
-		ctx := &Ctx(arg)
+		ctx := &BindCtx(arg)
 		body := req.vstring()
 		out := ctx.router.handle_envelope_from(body, ctx.label, ctx.reg)
 		C.webview_return(ctx.w, id, 0, out.str)
+	}
+}
+
+// eval_sink builds the Ctx.eval_fn for this window: webview_eval runs the
+// snippet on the thread that owns the webview (the thread webview_run
+// blocks on), which is the main thread the handlers run on (ADR-0010).
+// The closure is only ever called from V, never handed to C.
+fn eval_sink(w voidptr) fn (js string) ! {
+	return fn [w] (js string) ! {
+		unsafe {
+			C.webview_eval(w, js.str)
+		}
 	}
 }
 
@@ -70,7 +87,7 @@ fn run_windows(cfg Config) ! {
 	if w == unsafe { nil } {
 		return error('vails: webview_create failed (is the WebView2 runtime installed?)')
 	}
-	ctx := &Ctx{
+	ctx := &BindCtx{
 		w:      w
 		router: cfg.router
 		label:  cfg.label
@@ -86,8 +103,21 @@ fn run_windows(cfg Config) ! {
 	if cfg.url.len > 0 {
 		C.webview_navigate(w, cfg.url.str)
 	} else {
-		html := if cfg.html.len > 0 { cfg.html } else { '<h1>Vails</h1>' }
+		// document() injects the default CSP (T7) into the served HTML.
+		mut html := cfg.document()
+		if html == '' {
+			html = '<h1>Vails</h1>'
+		}
 		C.webview_set_html(w, html.str)
+	}
+	// Services (Phase 5) get the window handle + the V->JS eval path here,
+	// before webview_run blocks in the message loop.
+	if on_ready := cfg.on_ready {
+		on_ready(Ctx{
+			label:   cfg.label
+			eval_fn: eval_sink(w)
+			parent:  C.webview_get_window(w)
+		})
 	}
 	rc := C.webview_run(w)
 	C.webview_destroy(w)

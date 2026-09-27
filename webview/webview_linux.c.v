@@ -39,12 +39,25 @@ fn C.webkit_web_view_get_user_content_manager(view voidptr) voidptr
 fn C.webkit_user_content_manager_register_script_message_handler(manager voidptr, name &char) int
 
 fn C.gtk_widget_get_visible(widget voidptr) int
+// The GdkWindow of our top-level widget: services use it as the parent of
+// their own native UI. NULL until the widget is realized, so it must be
+// read after gtk_widget_show_all.
+fn C.gdk_window_get_window(widget voidptr) voidptr
+// V -> JS delivery: evaluates a snippet built by bridge.resolve_js /
+// events.to_js. The callback is a no-op trampoline (the result is unused);
+// WebKit requires a non-null function pointer here.
+fn C.webkit_web_view_run_javascript(view voidptr, script &char, cancellable voidptr, callback voidptr, user_data voidptr)
 
 // destroy_cb runs on window close and stops the GTK main loop.
 // Plain top-level fn (no captures) so it can cross the C boundary.
 fn destroy_cb() {
 	C.gtk_main_quit()
 }
+
+// js_trampoline is the WebKitJavaScriptFinishedCallback. It runs on the
+// main loop after the snippet was evaluated; nothing to do there, but C
+// requires a non-null function pointer.
+fn js_trampoline(_res voidptr, _data voidptr) {}
 
 fn run_linux(cfg Config) ! {
 	argc := 0
@@ -64,12 +77,31 @@ fn run_linux(cfg Config) ! {
 	if cfg.url.len > 0 {
 		C.webkit_web_view_load_uri(view, cfg.url.str)
 	} else {
-		html := if cfg.html.len > 0 { cfg.html } else { '<h1>Vails</h1>' }
+		// document() injects the default CSP (T7) into the served HTML.
+		mut html := cfg.document()
+		if html == '' {
+			html = '<h1>Vails</h1>'
+		}
 		C.webkit_web_view_load_html(view, html.str, unsafe { nil })
 	}
 	unsafe {
 		C.g_signal_connect_data(window, c'destroy', voidptr(destroy_cb), nil, nil, 0)
 	}
 	C.gtk_widget_show_all(window)
+	// Services (Phase 5) get the eval path + the GdkWindow as parent.
+	// Runs after show_all: gdk_window_get_window returns NULL until the
+	// widget is realized, and before gtk_main takes over the loop.
+	if on_ready := cfg.on_ready {
+		on_ready(Ctx{
+			label:   cfg.label
+			eval_fn: fn [view] (js string) ! {
+				unsafe {
+					C.webkit_web_view_run_javascript(view, js.str, nil,
+						voidptr(js_trampoline), nil)
+				}
+			}
+			parent:  C.gdk_window_get_window(window)
+		})
+	}
 	C.gtk_main()
 }
