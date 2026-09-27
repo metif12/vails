@@ -1,0 +1,56 @@
+{
+	"name": "Vails Services Demo",
+	"version": "0.1.0",
+	"asset_root": "frontend",
+	"windows": [
+		{
+			"label": "main",
+			"title": "Vails Services Demo",
+			"width": 900,
+			"height": 1050
+		}
+	],
+	"capabilities": [
+		{
+			"id": "clipboard",
+			"windows": ["main"],
+			"commands": ["clipboard.read_text", "clipboard.write_text"],
+			"asset_roots": ["frontend"],
+			"platforms": []
+		},
+		{
+			"id": "opener",
+			"windows": ["main"],
+			"commands": ["opener.open_url", "opener.open_path"],
+			"asset_roots": [],
+			"platforms": []
+		},
+		{
+			"id": "notifications",
+			"windows": ["main"],
+			"commands": ["notification.notify", "notification.is_supported"],
+			"asset_roots": [],
+			"platforms": []
+		},
+		{
+			"id": "host-info",
+			"windows": ["main"],
+			"commands": ["os_info.get"],
+			"asset_roots": [],
+			"platforms": []
+		},
+		{
+			"id": "denied-demo",
+			"windows": ["main"],
+			"commands": ["app.not_granted"],
+			"asset_roots": [],
+			"platforms": []
+		}
+	],
+	"bundle": {
+		"name": "Vails Services Demo",
+		"icon": "",
+		"windows_dll_side_by_side": true
+	}
+}
+

@@ -78,6 +78,21 @@ fn test_resolve_js_escapes_quote() {
 	assert snippet.contains("\\'")
 }
 
+// resolve_json is the same snippet for a caller that already holds the
+// encoded Response (the Linux raw-WebKitGTK path), and the two must not
+// drift: the escaping is the whole point of the function.
+fn test_resolve_json_matches_resolve_js() {
+	res := Response{
+		id:     'v7'
+		result: 'a "quoted" result'
+	}
+	assert resolve_json(encode_response(res)) == resolve_js(res)
+	// and it escapes the same way when called directly
+	snippet := resolve_json('{"err":"it\'s bad"}')
+	assert !snippet.contains("it's")
+	assert snippet.contains("\\'")
+}
+
 fn test_handle_message_from_allows_granted() {
 	mut r := new_router()
 	r.register('echo', transport_echo)!

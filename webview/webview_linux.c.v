@@ -5,7 +5,15 @@
 // (libgtk-3-dev, libwebkit2gtk-4.1-dev) with a real `v run` and record the
 // working set in docs/ADR. Declarations below are the minimal GTK+WebKit
 // surface; g_signal_connect is a C macro so we use g_signal_connect_data.
+//
+// The parts that need a C type V cannot express (WebKit's two callback
+// signatures, the JSC value extraction, the runtime user script) live in
+// webview_linux_shim.h, the same division of labour as webview_shim.h on
+// Windows. Everything here is the V-side glue.
 module webview
+
+import bridge
+import capabilities
 
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
@@ -16,6 +24,11 @@ module webview
 
 fn C.vails_js_set_target(js_fn voidptr)
 fn C.vails_run_javascript(view voidptr, script &char)
+fn C.vails_message_set_target(message_fn voidptr)
+fn C.vails_message_connect(manager voidptr, name &char, data voidptr) int
+fn C.vails_message_body(result voidptr) &char
+fn C.vails_add_runtime(manager voidptr, js &char)
+fn C.g_free(mem voidptr)
 
 fn C.gtk_init(argc &int, argv &&char)
 fn C.gtk_main()
@@ -63,8 +76,53 @@ fn destroy_cb() {
 // main loop after the snippet was evaluated; nothing to do there, but the
 // shim needs a real function to call. Plain top-level fn (no captures) and
 // no parameters, because a V function pointer is not a
-// WebKitJavaScriptFinishedCallback - the shim adapts it.
+// GAsyncReadyCallback - the shim adapts it.
 fn js_trampoline() {}
+
+// DispatchCtx crosses into the script-message callback the way BindCtx does
+// on Windows (webview_windows.c.v): the signal carries an opaque user_data,
+// and C never dereferences it - it only ferries the pointer back to the
+// callback. Heap-allocated, freed after gtk_main returns.
+struct DispatchCtx {
+	view    voidptr
+	router  &bridge.Router
+	label   string
+	reg     capabilities.Registry
+	runtime string
+}
+
+// message_cb is the single JS->V entry point on Linux. It runs on the GTK main
+// loop (the same thread the handlers run on, ADR-0010) and dispatches the T2
+// contract, exactly like bind_cb on Windows:
+//
+//	page -> vails.call -> postMessage -> here -> Router.handle_envelope_from
+//	     -> __resolve (evaluated back into the page)
+//
+// The reply rides out through vails_run_javascript because WebKit's script
+// message handler has no return value: Linux is the "raw WebKitGTK path" of
+// ADR-0004, Windows is the bound-function path.
+fn message_cb(result voidptr, data voidptr) {
+	ctx := &DispatchCtx(data)
+	body := unsafe { C.vails_message_body(result) }
+	if body == unsafe { nil } {
+		// Not a string payload: nothing to dispatch, and no reply the page
+		// could read. The page's promise then never settles, which is the same
+		// behaviour as a dropped native callback on Windows.
+		return
+	}
+	// cstring_to_vstring COPIES. `vstring()` does not - it reuses the C block
+	// (V's own comment: "the memory block pointed by cp is reused, not
+	// copied"), so reading it after the g_free below would be a
+	// use-after-free. That bug shipped for one debug run and produced the most
+	// confusing error in this project ("Invalid json: unknown value kind" on a
+	// body that had printed correctly one line earlier).
+	raw := unsafe { cstring_to_vstring(body) }
+	unsafe { C.g_free(voidptr(body)) }
+	out := ctx.router.handle_envelope_from(raw, ctx.label, ctx.reg)
+	unsafe {
+		C.vails_run_javascript(ctx.view, bridge.resolve_json(out).str)
+	}
+}
 
 fn run_linux(cfg Config) ! {
 	argc := 0
@@ -79,6 +137,28 @@ fn run_linux(cfg Config) ! {
 	view := C.webkit_web_view_new()
 	if view == unsafe { nil } {
 		return error('vails: webkit_web_view_new failed')
+	}
+	// The bridge: a heap context the signal callback ferries back to us, the
+	// script-message channel, and the runtime injected as a user script (the
+	// Linux answer to the webview library's webview_init). Without this the
+	// page has no window.vails at all and every example renders in preview
+	// mode - which is exactly how this was found.
+	ctx := &DispatchCtx{
+		view:   view
+		router: cfg.router
+		label:  cfg.label
+		reg:    cfg.registry
+	}
+	unsafe {
+		C.vails_js_set_target(voidptr(js_trampoline))
+		C.vails_message_set_target(voidptr(message_cb))
+		manager := C.webkit_web_view_get_user_content_manager(view)
+		if C.vails_message_connect(manager, c'vails', voidptr(ctx)) == 0 {
+			free(ctx)
+			return error('vails: could not register the vails script message handler')
+		}
+		C.vails_add_runtime(manager, bridge.runtime_js().str)
+		C.g_signal_connect_data(window, c'destroy', voidptr(destroy_cb), nil, nil, 0)
 	}
 	C.gtk_container_add(window, view)
 	if cfg.url.len > 0 {
@@ -113,4 +193,6 @@ fn run_linux(cfg Config) ! {
 		})
 	}
 	C.gtk_main()
+	// The webview is gone with the window; the dispatch context is ours.
+	unsafe { free(ctx) }
 }

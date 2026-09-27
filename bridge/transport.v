@@ -132,7 +132,16 @@ fn unwrap_args(raw string) string {
 // resolve_js builds the snippet the native side evaluates to deliver a
 // method response to the pending Promise in runtime_js.
 pub fn resolve_js(res Response) string {
-	return "window.vails.__resolve('" + jsesc.escape(encode_response(res)) + "');"
+	return resolve_json(encode_response(res))
+}
+
+// resolve_json is resolve_js for a caller that already holds the encoded
+// Response JSON. The Linux raw-WebKitGTK path is that caller: its native
+// callback gets the encoded string straight from handle_envelope_from, with no
+// Response struct in between (ADR-0004/0005). One function builds the snippet,
+// so both paths cannot drift.
+pub fn resolve_json(raw string) string {
+	return "window.vails.__resolve('" + jsesc.escape(raw) + "');"
 }
 
 // runtime_js is injected at document start. Exposes:

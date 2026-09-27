@@ -38,7 +38,10 @@ fn read_text_native(_ctx webview.Ctx) !string {
 	if raw == unsafe { nil } {
 		return ''
 	}
-	text := unsafe { raw.vstring() }
+	// cstring_to_vstring COPIES; vstring() reuses the GTK-owned block, so
+	// reading it after the g_free below would be a use-after-free (ADR-0015
+	// Notes - the same trap bit the Linux bridge first).
+	text := unsafe { cstring_to_vstring(raw) }
 	unsafe { C.g_free(voidptr(raw)) }
 	return text
 }

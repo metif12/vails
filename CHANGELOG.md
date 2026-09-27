@@ -60,17 +60,27 @@ the fixes the codegen work surfaced.
 - `v test .` now passes on **Linux** as well as Windows (29 test files). It
   never did: `dialog_test.v` referenced a Windows-only helper, which moved to
   pure V so the mapping is testable everywhere.
-- **A Vails app builds on Linux again.** The Linux backend had not compiled
-  since the `Ctx.parent` / V→JS work landed: `webkit_web_view_run_javascript`
-  was handed a V function pointer where WebKit wants a
-  `GAsyncReadyCallback`, and `gdk_window_get_window` was called without a
-  reachable declaration. Both are fixed behind a small C shim
-  (`webview/webview_linux_shim.h`), so the V→JS path and the Linux
-  `Ctx.parent` are real. See ADR-0015.
+- **A Vails app builds on Linux again, and its bridge works.** The Linux
+  backend had not compiled since the `Ctx.parent` / V→JS work landed, and
+  even once it did, the page had no `window.vails` at all: the JS→V
+  transport was the Phase 2 leftover, still only declared
+  (`webkit_user_content_manager_register_script_message_handler` was
+  declared and never called) — every example rendered in preview mode. Now
+  the runtime is injected as a user script, the `script-message-received`
+  channel is wired, and the reply rides back out through
+  `bridge.resolve_json` + `run_javascript`. The Linux service proofs in
+  `tests/e2e_linux/` are the first that could run at all. See ADR-0015.
 - **`vails doctor` reports the native backends.** A new `backends` section
   lists every built-in service with `ok`/`stub` for *this* platform, and names
   a granted service that is a stub here. A `vails.json` grant is not a
   promise, and doctor says so before the app runs. See ADR-0015.
+- **`examples/services`**: four services in one window (clipboard, opener,
+  notification, os_info) and the E2E vehicle for the wave. The clipboard probe
+  is the one that needs no human — write a known non-ASCII string, read it
+  back, compare — so a screenshot is the whole round trip through the real
+  user32/GTK clipboard. `tests/e2e_windows/capture.ps1` makes the Windows
+  screenshots repeatable, and `tests/e2e_linux/run_services.sh` does the same
+  under xvfb.
 
 ## [0.2.0] - 2026-09-27
 
