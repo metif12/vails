@@ -8,6 +8,7 @@
 module webview
 
 import bridge
+import capabilities
 
 #include <webview/webview.h>
 #insert "@VMODROOT/webview/webview_shim.h"
@@ -35,22 +36,28 @@ fn C.webview_return(w voidptr, id &char, status int, result &char) int
 fn C.webview_eval(w voidptr, js &char) int
 
 // Ctx crosses the C boundary as webview_bind's arg so bind_cb can reach
-// both the instance (for webview_return) and our Router. Heap-allocated,
-// freed after webview_run returns; plain C struct layout, no V managed
-// fields inside except the router reference (never written through).
+// the instance (for webview_return), our Router and the T2 dispatch
+// context (window label + capability registry). Heap-allocated, freed
+// after webview_run returns. C never dereferences it — it only ferries
+// the pointer back to bind_cb — so V-managed fields are safe here.
 struct Ctx {
 	w      voidptr
 	router &bridge.Router
+	label  string
+	reg    capabilities.Registry
 }
 
 // bind_cb is the single JS->V entry point on Windows. Plain top-level fn
 // (no captures) so it can cross into C. The library resolves the JS
-// promise from webview_return; our envelope (Response JSON) rides inside.
+// promise from webview_return; our envelope (Response JSON for commands,
+// Ack JSON for one-way events) rides inside. Dispatch runs the T2
+// contract: capability gate + params validation for commands, gate only
+// for events (see bridge.handle_envelope_from).
 fn bind_cb(id &char, req &char, arg voidptr) {
 	unsafe {
 		ctx := &Ctx(arg)
 		body := req.vstring()
-		out := ctx.router.handle_message(body)
+		out := ctx.router.handle_envelope_from(body, ctx.label, ctx.reg)
 		C.webview_return(ctx.w, id, 0, out.str)
 	}
 }
@@ -66,6 +73,8 @@ fn run_windows(cfg Config) ! {
 	ctx := &Ctx{
 		w:      w
 		router: cfg.router
+		label:  cfg.label
+		reg:    cfg.registry
 	}
 	unsafe {
 		C.vails_webview_bind(w, c'vails_call', voidptr(bind_cb), voidptr(ctx))

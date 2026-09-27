@@ -3,6 +3,7 @@
 module webview
 
 import bridge
+import capabilities
 
 pub struct Config {
 pub mut:
@@ -18,6 +19,12 @@ pub mut:
 	// router serves JS->V calls. Required on Windows (webview_bind arg);
 	// on Linux it is accepted and reserved for the Phase 2 wiring.
 	router &bridge.Router = unsafe { nil }
+	// registry gates JS->V dispatch (T2): the native backend passes label
+	// with every incoming body into Router.handle_envelope_from. Empty
+	// denies everything (secure by default); build it from vails.json via
+	// config.VailsConfig.to_registry(). Linux enforcement lands with its
+	// transport wiring (ADR-0004); until then this field is Windows-only.
+	registry capabilities.Registry
 }
 
 // validate rejects nonsense configs before any native call so mistakes
