@@ -108,14 +108,22 @@ fn test_granted_commands_dedupes() {
 		['ping', 'dialog.open']
 }
 
-// The catalog is empty until Phase 5 S1 wave 1 lands its first service;
-// the wrappers are the seam the CLI and services build on.
-fn test_catalog_wrappers_start_empty() {
-	assert manifests().len == 0
-	assert find('demo') == none
-	assert service_of('demo.run') == none
-	assert lookup('demo.run') == none
-	svcs, unknown := select_for(['demo.run'])
-	assert svcs.len == 0
-	assert unknown == ['demo.run']
+// The catalog wrappers are the seam the CLI and the services build on;
+// Phase 5 S1 wave 1 puts dialog and os_info in it.
+fn test_catalog_wrappers_see_the_built_in_services() {
+	assert manifests().len == 2
+	assert (find('dialog') or { panic('missing') }).name == 'dialog'
+	assert (find('os_info') or { panic('missing') }).name == 'os_info'
+	assert service_of('dialog.open') != none
+	assert service_of('os_info.get') != none
+	// a name nothing provides is reported, not silently ignored
+	svcs, unknown := select_for(['dialog.open', 'ping'])
+	assert svcs.len == 1
+	assert unknown == ['ping']
+}
+
+fn test_lookup_in_resolves_through_the_catalog() {
+	s, c := lookup('dialog.save') or { panic('missing') }
+	assert s.name == 'dialog'
+	assert c.name == 'dialog.save'
 }

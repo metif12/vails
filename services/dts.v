@@ -25,9 +25,10 @@ pub fn (s Service) specs() []generator.MethodSpec {
 	return out
 }
 
-// dts renders one `export namespace <service> { … }` block per service.
-// The runtime part declares the window.vails shape the JS snippet
-// installs, so `import { dialog } from './vails'` type-checks.
+// dts renders one `export namespace <service> { … }` block per service:
+// the manifest's TypeScript declarations, then the promise-returning
+// function per command. The runtime part declares the window.vails shape
+// the JS snippet installs, so `window.vails.dialog.open` type-checks.
 pub fn dts(svcs []Service) string {
 	mut out := ''
 	for s in svcs {

@@ -14,6 +14,10 @@ module services
 // OS-agnostic: a manifest describes a service's contract, not its
 // platform support, so the same list is valid on every OS.
 pub fn manifests() []Service {
-	// Phase 5 S1 wave 1 (ADR-0014) lands the first entries here.
-	return []Service{}
+	// Phase 5 S1 wave 1 (ADR-0014). The catalog order is the order the
+	// .d.ts blocks and the JS snippets are emitted in.
+	return [
+		dialog_manifest(),
+		os_info_manifest(),
+	]
 }

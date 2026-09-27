@@ -39,6 +39,11 @@ pub:
 	version  string
 	summary  string
 	commands []Command
+	// ts_types are raw TypeScript declarations (interfaces, type aliases)
+	// the command signatures refer to. They live in the manifest so the
+	// .d.ts is generated from one source, and they are emitted inside the
+	// service's namespace (tab-indented already).
+	ts_types []string
 }
 
 // prefix is the service's namespace fragment ('dialog' -> 'dialog.'),
