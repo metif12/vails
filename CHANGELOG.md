@@ -103,7 +103,14 @@ Linux side, all of them now covered by a build or an E2E run:
 
 ## [Unreleased]
 
-- Nothing yet.
+- Planned frontend track (Vite + web frameworks, ADR-0016): type-safe
+  bindings generated from V handler structs and injected into the
+  frontend (`vails-bindings.d.ts` + `vails-client.ts`), JS/V helpers
+  replacing the repetitive `call(method, "")` / manual `json.encode` /
+  untyped `onEvent` boilerplate, and `gen-bindings` / `init --template
+  vite-vanilla-ts|vite-vue` / `run --dev` / dist-embedding `build`
+  wiring. Ordered F0→F4 after Phase 5 S1 wave 3 + Phase 5b, before
+  Phase 7; no code yet, ROADMAP track only.
 
 ## [0.2.0] - 2026-09-27
 

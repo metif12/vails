@@ -180,6 +180,58 @@ Next: Phase 5 S1 wave 3 (`menu` → `tray` behind a window-procedure ADR),
 then the rest of Phase 5b. Estimate: ~3 focused weeks.
 Each item: code + tests on both OSes + short ADR + ROADMAP checkbox.
 
+## Frontend track (Vite + web frameworks, type-safe bindings + JS/V helpers; planned, not started — ADR-0016)
+
+Goal: build frontends with Vite + a web framework (Vue/React/Svelte/Solid
+or vanilla-ts) while staying type-safe end to end: TS types are generated
+from the V side and injected into the frontend, and thin helpers on both
+sides remove the repetitive `call(method, "")` / manual `json.encode` /
+`parseInt` / untyped `onEvent` boilerplate seen in `examples/hello`.
+Stays framework-agnostic: Vite is the build/dev tool, frameworks are
+`vails init --template` variants (vanilla-ts first, then vue). The wire
+protocol is unchanged (T2 commands/events, T3 channels); only a typed
+layer + helpers wrap it, so `vails dts` (T5) stays the single source of
+the `.d.ts` shape and manifests stay the per-service source of commands.
+
+- [ ] **F0 — Binding schema decision (half a day, no code)**: `Params` /
+  `Result` structs next to each handler + `bind_typed[T, P]` as the
+  registration path (replaces `register` + `validate_empty` +
+  manual `json.decode/encode`); unknown/complex V types map to `unknown`
+  with a `// TODO refine` comment so the build never breaks. Recorded in
+  ADR-0016; gates F1.
+- [ ] **F1 — Typed generator (pure-V)**: new `generator/bindings.v`
+  (`v_to_ts` mapping table `string/int/f64/bool/struct/[]T/map/?T`,
+  `TypedSpec`, `generate_client` emitting both
+  `vails-bindings.d.ts` and the importable `vails-client.ts` wrapper
+  around the existing `window.vails.call/emit/onEvent`); snapshot tests
+  in `generator/bindings_test.v`, green on Windows. No bridge/C changes.
+- [ ] **F2 — V + JS helpers (pure-V + generated TS)**: new
+  `bridge/helpers.v` (`bind_typed`, `bind_empty`, `ok`/`fail`,
+  `emit_typed`, typed `ChannelHub` push, `use_state[T]` over
+  `application.App` store); generated `api.*` typed functions,
+  `onEvent<T>`, `useChannel<T>`, `callOrPreview<T>` (the typed form of
+  hello's preview fallback). Proof: `examples/hello/main.v` re-registered
+  through helpers with zero protocol change; existing pong E2E stays green.
+- [ ] **F3 — Config + CLI wiring (additive)**: `config.FrontendConfig`
+  (`dir`, `dev_url`, `dist`, `gen_dir` with `frontend/`,
+  `http://localhost:5173`, `dist/`, `src/gen` defaults);
+  `vails gen-bindings [--out]`, `init --template vite-vanilla-ts|vite-vue`,
+  `run --dev` (spawn `npm run dev`, open `webview.Config.url` at the dev
+  URL, CSP dev allowlist for `localhost:5173` + `ws:`), `build` (`npm run
+  build` → `dist/` into `assets.Bundle`), `doctor` checks (`node`/`npm`,
+  stale `gen/` warning). Tests: config validation + CLI dry-runs, pure-V.
+- [ ] **F4 — Typed events/channels + example**: `emit_typed`/`open_typed`
+  for `events.Bus` + T3 channels (generic `onEvent<T>` frontend side);
+  new `examples/hello-vite/` (same counter/ping as hello, `src/main.ts` +
+  `App.vue` calling `api.counter_inc(): Promise<number>`); e2e README
+  lines + manual screenshot proofs on Win/Linux.
+
+Order: F0 → F1 → F2 → F3 → F4, after Phase 5 S1 wave 3 + Phase 5b, before
+Phase 7 (F1 feeds the Phase 7 `$for` auto-spec work; F3 feeds T5/Phase 7
+packaging). Per AGENTS.md §3 phase discipline: none of F1–F4 starts while
+Phase 5 is the current phase. Each item: code + tests on both OSes +
+short ADR update + checkbox.
+
 ## Mobile track (both platforms, plan-only until SDK/macOS exist; ADR-0006)
 
 Model: Wails v3 (same desktop code + `$if android/ios` platform files;
