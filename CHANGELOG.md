@@ -27,7 +27,8 @@ Conventions for this file:
   `FAIL`, and also on "almost nothing reported", since a run that exits 0 because
   nothing ran is the failure mode that matters most here. `NEEDS YOU` and
   `NOWHERE` do **not** fail a run: a Linux box with no `drop` backend is not a
-  broken box.
+  broken box. **Proven on Windows 2026-10-03**: 7 pass, 1 fail, 3 human-only
+  panels never ran — and the first run found five bugs in the showcase itself.
 - **`demo.verdict` / `demo.finish`** — the channel a verify run reports through.
   The page owns each verdict (V cannot read the DOM) and this is how one becomes
   text. Both are unset on a normal launch: no probe modes, no injected script, and

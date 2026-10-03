@@ -1050,18 +1050,43 @@ a small platform nicety, or a non-goal with a reason attached.
   compiles, returns correct exit codes and **prints nothing at all**
   (tests/e2e_windows/README.md opens with that, and with the four theories
   already ruled out). `capture.ps1` still works, so the capture path is not lost.
-  - **What landed instead, and it is better than the screenshot it replaces for
-    checking**: `VAILS_SHOWCASE_VERIFY=1` runs every machine-checkable panel and
-    reports each verdict **as text**, with a process exit code (ADR-0037's
-    amendment). A PNG cannot be diffed for "the clipboard panel passed"; a line of
-    text can, and it can be pasted into a changelog or asserted by a script. The
-    exit code is 1 on any `FAIL` **and** on "almost nothing reported", because a
-    run that exits 0 because nothing ran is the failure mode that matters. It also
-    needs no GDI, so it is not downstream of the broken capture path.
-  - **Not proven: any of it at runtime.** No verify run has happened, because
-    that means launching the window on this machine, which is the thing that has
-    been crashing the host. The next step is one command and one screenshot of the
-    output: `$env:VAILS_SHOWCASE_VERIFY = "1"; .\showcase.exe`.
+  - **PROVEN, and it found five bugs in the showcase on its first run** (below).
+    A real transcript, Windows, 2026-10-03:
+    ```
+    bridge       PASS         demo.ping -> pong:vails
+    caps         PASS         refused as expected: unknown method: app.not_granted
+    osinfo       PASS         8 host facts
+    clipboard    PASS         round trip: "vails showcase clipboard proof"
+    notify       FAIL         RoGetActivationFactory(ToastNotificationManager) failed (hr=0x80040154)
+    opener       PASS         refused as expected: bad params: opener: scheme "file" is not allowed
+    menu         PASS         window menu bar installed - File / Help now open on the window
+    post         PASS         demo:posted "from a worker thread"
+
+    showcase: 7 pass, 0 need a human, 0 not on this platform, 1 fail, 3 of 11 panels never ran
+    showcase: verify finished with exit code 1
+    ```
+    Seven capabilities verified on Windows, one line each, in a form a script can
+    assert. **The remaining screenshot-per-panel capture is still outstanding** —
+    it needs `capture.vsh`, which does not work — but the *checking* half of R4 is
+    no longer downstream of it.
+  - **The five bugs it found are the argument for having it**: the clipboard panel
+    sent `{text}` where the service takes a bare JSON string; the os_info panel
+    set its badge by hand and so **reported nothing at all**; `run("menubar")`
+    painted a panel named `menubar`, which does not exist, so that card showed no
+    "running" line; `IDLE` was counted as a verdict, which pushed the tally past
+    11 and made "panels never ran" read 0; and `demo.finish` never closed the
+    window. Four of the five were invisible to a human reading the window.
+  - **Two open findings, named rather than guessed**:
+    1. **`Ctx.close()` does not close a window on Windows.** It reports success —
+       `webview_terminate` is reached and returns 0 — and `webview_run` never
+       returns. So a verify run gets a **watchdog**: after 15 s it prints the
+       report and ends the process itself. A harness that depends on the
+       thing-under-test's shutdown cannot report a failure *of* that shutdown.
+    2. **The WinRT toast fails with `hr=0x80040154`** (REGDB_E_CLASSNOTREG, the
+       class is not registered). Candidate causes are an unregistered
+       AppUserModelID for an unpackaged app and a session without the toast
+       platform; this is **not yet attributed**, and the earlier
+       `notification.png` proof does not settle it.
   - **The report logic is not unit-tested**, because it lives in `examples/` and
     `v test .` does not reach examples. Moving it into a framework module would
     be the wrong home for logic only this app uses; the verify run is its test.

@@ -113,11 +113,19 @@ Two consequences worth being honest about:
   nothing else, so a listener cannot be removed; the U0 panel uses a `settled`
   flag instead. That gap was found by writing this page and is recorded here
   because the next panel that needs to unregister will hit it too.
-- R3 stays **unchecked**. The app builds, the manifest validates, `vails doctor`
-  reports all eight services, and the generated `.d.ts` carries the drop types —
-  and nobody has watched a window with eleven verdicts in it, for the same reason
-  F0 and F1 are unproven: the GUI proofs go through the `webview` module that
-  crashes this host. R4 is what turns those panels into screenshots.
+- **`Ctx.close()` does not close a window on Windows**, measured 2026-10-03 while
+  building the verify mode: `webview_terminate` is reached, returns 0, `close()`
+  reports success, and `webview_run` never returns. This is why verify mode has a
+  **watchdog** that ends the process itself after 15 s rather than trusting the
+  app's own shutdown path — a harness that depends on the shutdown of the thing it
+  is testing cannot report a failure *of* that shutdown.
+- R3 is no longer unchecked. **Proven on Windows 2026-10-03**: seven capabilities
+  verified in one run (bridge, capability gate, os_info, clipboard, opener, window
+  menu bar, main-thread post), one line each. The `notify` panel **fails** with
+  `RoGetActivationFactory` → `hr=0x80040154` and is **not yet attributed** — the
+  two candidates are an unregistered AppUserModelID for an unpackaged app and a
+  session without the toast platform. Three panels (dialog, tray, drop) are
+  human-only by construction and are reported as never run rather than guessed at.
 
 ## Verification
 

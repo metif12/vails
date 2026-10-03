@@ -302,7 +302,20 @@ function paint(key, verdict, text) {
 // report_verdict sends one verdict to `demo.verdict`. Failures are swallowed on
 // purpose: a report channel that could break a panel would turn "the framework
 // works" into "the reporting works", which is the wrong thing to be testing.
+//
+// TWO RULES, both found by running this rather than by reading it:
+//
+//   - IDLE is not a verdict. It is "running...", and counting it made every panel
+//     report twice, which pushed the tally past 11 and made "panels never ran"
+//     come out as zero — a report that was confidently wrong.
+//   - One conclusion per panel. An OS-initiated event arriving later (a
+//     `menu:clicked`, say) repaints the panel, and each repaint used to append
+//     another entry, so a panel could report four times and drown the tally.
+const reported = {};
+
 function report_verdict(key, verdict, text) {
+  if (verdict === "IDLE" || reported[key]) return;
+  reported[key] = true;
   try {
     window.vails.call("demo.verdict", JSON.stringify({
       panel: key,
@@ -395,6 +408,11 @@ const RUNNERS = {
     );
   },
 
+  // This one used to set the badge and the verdict by hand instead of going
+  // through paint(), which meant it drew correctly and **reported nothing** — a
+  // panel that looks finished and is absent from the machine-checkable output.
+  // The verify run caught it as a missing line, which is exactly the kind of
+  // thing only a second consumer of the verdict notices.
   osinfo() {
     return call("os_info.get").then((r) => {
       let facts = {};
@@ -414,22 +432,23 @@ const RUNNERS = {
         dl.appendChild(dt);
         dl.appendChild(dd);
       });
-      const p = panels.osinfo;
-      p.out.textContent = "";
-      p.out.appendChild(dl);
-      p.out.className = VERDICT_CLASS.PASS;
-      p.badge.textContent = "PASS";
-      p.badge.className = "badge pass";
-      p.verdict = "PASS";
-      tally();
+      // paint() writes into `output`, which is where the panel's status line
+      // lives; the facts list is appended after it so both are visible.
+      paint("osinfo", "PASS", keys.length + " host facts");
+      panels.osinfo.out.appendChild(dl);
     });
   },
 
   // Write, read, compare. Three steps because "write_text returned" is not the
   // claim; the claim is that the bytes came back.
+  //
+  // `JSON.stringify(text)` and NOT `{text: text}`: the clipboard service takes the
+  // text as a bare JSON string (ADR-0010 keeps params raw JSON), and the object
+  // form is rejected with "expected a JSON string". The services example sends
+  // the same shape, which is why this was wrong only here.
   clipboard() {
     const want = document.getElementById("clip-text").value;
-    return call("clipboard.write_text", JSON.stringify({ text: want }))
+    return call("clipboard.write_text", JSON.stringify(want))
       .then(() => call("clipboard.read_text"))
       .then((r) => {
         if (r === want) {
@@ -545,15 +564,33 @@ window.vails.onEvent("tray:clicked", (data) => {
   paint("tray", "PASS", "tray:clicked " + JSON.stringify(data));
 });
 
+// ACTION -> PANEL. An action is not always a panel: `menu` is a panel, `menubar`
+// is the action that fills it. `run()` looks the panel up by this map, so the
+// "running..." line lands on the right card.
+//
+// Without it, `run("menubar")` painted a panel named "menubar" — which does not
+// exist, so paint() returned early and the panel showed no IDLE line at all. The
+// verify run noticed the gap (a panel with a PASS and no "running" before it),
+// which is the only reason a cosmetic mismatch turned into a found bug.
+const ACTION_PANEL = {
+  menubar: "menu",
+  popup: "menu",
+  dialogOpen: "dialog",
+  dialogMessage: "dialog",
+  trayRemove: "tray",
+  dropOff: "drop"
+};
+
 // run dispatches one panel, after the support gate. The gate is asked BEFORE the
 // command so a missing backend is reported as a platform fact and not as a
 // command failure.
 function run(key) {
-  if (gate(key)) return Promise.resolve();
+  const panel = ACTION_PANEL[key] || key;
+  if (gate(panel)) return Promise.resolve();
   const fn = RUNNERS[key];
   if (!fn) return Promise.resolve();
-  paint(key, "IDLE", "running...");
-  return Promise.resolve(fn()).catch((e) => paint(key, "FAIL", msg(e)));
+  paint(panel, "IDLE", "running...");
+  return Promise.resolve(fn()).catch((e) => paint(panel, "FAIL", msg(e)));
 }
 
 document.querySelectorAll("[data-run]").forEach((btn) => {

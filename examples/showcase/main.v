@@ -297,15 +297,23 @@ fn record_verdict(mut holder &CtxHolder, panel string, verdict string, detail st
 // matters: a run that exits 0 because nothing ran is the failure mode here.
 fn report(holder &CtxHolder) int {
 	mut counts := map[string]int{}
-	mut unrun := 0
 	for v in holder.verdicts {
 		counts[v.verdict]++
+	}
+	// "Never ran" is its own number and not the absence of one. Three panels are
+	// human-only by construction (a file picker, a tray right-click, a drag), so a
+	// verify run that skipped them must say so — reporting "0 need a human" for
+	// panels that were never even reached is the kind of tidy lie this whole
+	// design exists to avoid.
+	mut never := expected_panels - holder.verdicts.len
+	if never < 0 {
+		never = 0
 	}
 	println('')
 	println('showcase: ' + counts['PASS'].str() + ' pass, ' +
 		counts['NEEDS YOU'].str() + ' need a human, ' + counts['NOWHERE'].str() +
 		' not on this platform, ' + counts['FAIL'].str() + ' fail, ' +
-		unrun.str() + ' of ' + expected_panels.str() + ' panels reported')
+		never.str() + ' of ' + expected_panels.str() + ' panels never ran')
 	if counts['FAIL'] > 0 {
 		return 1
 	}
@@ -339,9 +347,17 @@ fn pad(s string, n int) string {
 // has returned.
 fn close_after(ctx webview.Ctx, ms int) {
 	time.sleep(ms * time.millisecond)
+	// Both of these are logs rather than assumptions. The first version of this
+	// had neither, and a verify run that did not end produced **no output at
+	// all** — which is indistinguishable from a run that is still working, and is
+	// the exact failure this mode exists to make visible.
+	println('  finish      closing the window (' + ctx.can_close().str() +
+		' can_close)')
 	ctx.close() or {
 		eprintln('showcase: could not close the window: ' + err.msg())
+		return
 	}
+	println('  finish      close requested')
 }
 
 // VerdictParams is `demo.verdict`'s wire shape. `pub mut` because json2 fills
@@ -396,18 +412,36 @@ pub fn parse_verdict(params string) !Verdict {
 // tray right-click have no machine answer, and asking for one is how a verify run
 // hangs forever. They stay IDLE and the report says so, which is the honest
 // outcome rather than a timeout.
+//
+// ## Why `finish` is called from BOTH chain outcomes, and why there is a timer
+//
+// The first version chained `chain.then(finish).catch(noop)`, so any rejection
+// anywhere in the run meant `demo.finish` was never called and the window stayed
+// up forever. The observed symptom was exactly that: seven panels reported and
+// then nothing, with an empty stderr, because the rejection is swallowed by the
+// very handler meant to tidy up.
+//
+// So: finish runs on resolve AND on reject, and a 20 s timer runs it regardless.
+// A verify run must always end — a window left open is indistinguishable from a
+// run that is still working, which is the failure mode this whole mode exists to
+// avoid.
 fn verify_script() string {
 	return 'window.showcase.verify = true;' + '\n' +
 		'window.showcase.ready.then(function () {' + '\n' +
+		'  var finish = function () {' + '\n' +
+		'    return window.vails.call("demo.finish", "").catch(function () {});' +
+		'\n' +
+		'  };' + '\n' +
+		'  var safety = setTimeout(finish, 20000);' + '\n' +
 		'  var auto = ["bridge", "caps", "osinfo", "clipboard", "notify", ' +
 		'"opener", "menubar", "post"];' + '\n' +
 		'  var chain = Promise.resolve();' + '\n' +
 		'  auto.forEach(function (k) { chain = chain.then(function () {' + '\n' +
 		'    return window.showcase.run(k);' + '\n' +
 		'  }); });' + '\n' +
-		'  chain.then(function () {' + '\n' +
-		'    return window.vails.call("demo.finish", "");' + '\n' +
-		'  }).catch(function () {});' + '\n' +
+		'  var end = function () { clearTimeout(safety); return finish(); };' +
+		'\n' +
+		'  chain.then(end, end);' + '\n' +
 		'});'
 }
 
@@ -506,6 +540,7 @@ fn main() {
 		// of a `mut` *parameter* is typed as a pointer to the pointer by V 0.5.2
 		// and gcc rejects the assignment — a plain local captures correctly.
 		mut closer := holder
+		println('  finish      the page asked the app to close the window')
 		spawn close_after(closer.ctx, 250)
 		return ''
 	}) or {
@@ -553,6 +588,14 @@ fn main() {
 			eprintln('showcase: drop: ' + err.msg())
 		}
 	}
+	// A verify run gets a watchdog BEFORE the window opens, so the timer starts
+	// when the run does rather than after the page has loaded. A plain reference,
+	// because `spawn` with a `mut ... &T` crashes or hangs in this V (AGENTS.md
+	// §2c); `holder` is already a heap struct, so the pointee is the shared one.
+	if verify {
+		mut watcher := holder
+		spawn watchdog(watcher, verify_settle_ms)
+	}
 	webview.run(webview.Config{
 		label:    w.label
 		title:    w.title
@@ -573,3 +616,30 @@ fn main() {
 		exit(report(holder))
 	}
 }
+
+// watchdog ends a verify run on its own terms, which is a deliberate choice.
+//
+// The obvious design is "the page asks the app to close the window, then the app
+// reports". Measured on Windows 2026-10-03: **`Ctx.close()` reports success and
+// the window stays open.** `webview_terminate` is reached (the log line is
+// printed), returns 0, and `webview_run` never comes back — so the first version
+// of this mode printed every panel and then sat there until it was killed.
+//
+// That is precisely the failure mode this mode exists to prevent: a harness that
+// depends on the thing-under-test's shutdown path cannot report a failure *of*
+// that path. So the watchdog is the authority: after `settle_ms` it prints the
+// report and ends the process itself, and `demo.finish` is still there to close
+// the window cleanly on any platform where close works.
+fn watchdog(holder &CtxHolder, settle_ms int) {
+	time.sleep(settle_ms * time.millisecond)
+	println('  finish      watchdog: the window did not close on its own')
+	code := report(holder)
+	println('')
+	println('showcase: verify finished with exit code ' + code.str())
+	exit(code)
+}
+
+// verify_settle_ms is how long the watchdog waits. Long enough for a first page
+// load and eight service round trips on a slow machine, short enough that a hung
+// run is a nuisance rather than an abandonment.
+const verify_settle_ms = 15000
