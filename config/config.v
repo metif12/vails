@@ -35,11 +35,86 @@ pub mut:
 // BundleConfig holds packaging metadata. windows_dll_side_by_side
 // records the Phase 1 lesson: the webview/WebView2 loader DLLs must sit
 // next to the .exe on Windows.
+//
+// identifier is the app's stable identity, and on Windows it is the
+// AppUserModelID: a desktop (unpackaged) app cannot raise a WinRT toast
+// without one, so the notification service registers it and the toast is
+// attributed to this app rather than to a bare .exe (ADR-0018). It is
+// optional here because nothing except notification needs it, and an app
+// that never notifies should not be forced to invent an identity.
 pub struct BundleConfig {
 pub mut:
 	name                     string
 	icon                     string
+	identifier               string
 	windows_dll_side_by_side bool = true
+}
+
+// AppUserModelID bounds. Windows accepts an AUMID up to 128 characters,
+// and the shell matches one exactly, so an over-long or over-clever one
+// silently produces a toast attributed to nothing.
+const max_identifier = 128
+
+// validate_identifier enforces the AppUserModelID rules in pure V, so a
+// malformed identity is a `vails doctor` line instead of a toast that
+// quietly does not appear.
+//
+// The rules are the shell's, not ours: ASCII alphanumeric plus '.', '-'
+// and '_', at most 128 characters, and no leading or trailing period.
+// Spaces matter most - a space in an AUMID is the classic reason a toast
+// raises a notifier but shows nothing.
+//
+// Empty is allowed (see BundleConfig.identifier); a caller that needs one
+// builds it with default_identifier.
+pub fn validate_identifier(id string) ! {
+	if id == '' {
+		return
+	}
+	if id.len > max_identifier {
+		return error('vails.json: bundle.identifier is longer than ' +
+			max_identifier.str() + ' characters (it is the Windows AppUserModelID)')
+	}
+	for c in id {
+		valid := (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`)
+			|| (c >= `0` && c <= `9`) || c == `.` || c == `-` || c == `_`
+		if !valid {
+			return error('vails.json: bundle.identifier may only use letters, ' +
+				'digits, ".", "-" and "_" (Windows AppUserModelID); got "' + id + '"')
+		}
+	}
+	if id.starts_with('.') || id.ends_with('.') {
+		return error('vails.json: bundle.identifier must not start or end with "." ' +
+			'(Windows AppUserModelID)')
+	}
+}
+
+// default_identifier turns an app name into a valid AppUserModelID, so
+// `vails init` can scaffold one without the author having to know the
+// charset. It lowercases and drops every character the shell rejects,
+// which is why the result is validated rather than assumed: an app named
+// "My App!" becomes "myapp" and nothing more.
+pub fn default_identifier(app_name string) string {
+	mut out := []u8{}
+	for c in app_name.to_lower() {
+		valid := (c >= `a` && c <= `z`) || (c >= `0` && c <= `9`)
+			|| c == `.` || c == `-` || c == `_`
+		if valid {
+			out << u8(c)
+		}
+		if out.len == max_identifier {
+			break
+		}
+	}
+	// A leading or trailing '.' is rejected by validate_identifier, so
+	// strip them here rather than handing back something the shell would
+	// refuse. trim takes a cutset and removes both ends in one call.
+	s := out.bytestr().trim('.')
+	// A name made entirely of rejected characters (e.g. "!!!") would
+	// otherwise produce an empty - and therefore invalid - AUMID.
+	if s == '' {
+		return 'vails.app'
+	}
+	return s
 }
 
 // VailsConfig is the root of vails.json: app identity, window list,
@@ -68,7 +143,13 @@ pub fn default_config(app_name string) VailsConfig {
 			},
 		]
 		bundle:     BundleConfig{
-			name: app_name
+			name:       app_name
+			// Scaffolded rather than left empty: an app that later grants
+			// notification.notify needs an AppUserModelID, and the author
+			// is better served by a working one they can edit than by a
+			// field that is empty until the toast mysteriously does not
+			// appear (ADR-0018).
+			identifier: default_identifier(app_name)
 		}
 	}
 }
@@ -127,6 +208,7 @@ pub fn (c VailsConfig) validate() ! {
 			return error('vails.json: capability "' + spec.id + '" grants no commands')
 		}
 	}
+	validate_identifier(c.bundle.identifier)!
 }
 
 // window returns the config of the window with the given label.

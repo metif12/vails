@@ -321,19 +321,53 @@ fn test_manifest_installs_against_a_fake_backend() {
 	assert res.result.contains('"button":"ok"')
 }
 
-fn test_backend_is_pending_on_linux() {
-	// On Linux the shim is an explicit stub: the error must say so instead
-	// of resolving with a fake result. The call is safe there because no
-	// native dialog exists to block on.
+// There is deliberately no unit test that dispatches dialog.open / dialog.save
+// / dialog.message through the router on Linux, and there never was: the
+// comment above test_manifest_installs_against_a_fake_backend already says why
+// (ADR-0014, a modal dialog blocks until a human answers).
+//
+// The stub-era version of this test only passed because there was no backend
+// behind it. Once the GTK backend became real, that test had exactly two
+// possible outcomes and both are wrong: with no display the call returns an
+// error, and with a display it opens a real modal dialog and parks in
+// gtk_dialog_run. A hang is not a test, and an error is not a contract anyone
+// can rely on - whether it comes back depends on the machine the suite runs on.
+//
+// So the coverage is split, and both halves are real:
+//
+//   - the response-id mapping, in this file, as pure V: GTK_RESPONSE_OK and
+//     GTK_RESPONSE_ACCEPT both report "ok", the four ways GTK can say no all
+//     report "cancel", and only ACCEPT means the chooser took the files.
+//   - the widget, the nested loop and the real response, in
+//     tests/e2e_linux (VAILS_SERVICES_PROBE=dialog), which answers the dialog
+//     from a timer so the proof needs no human.
+//
+// What this test does check is the part that IS reachable headlessly: the
+// service installs, and nothing gets past the gate into the native layer.
+fn test_the_linux_dialog_native_path_is_e2e_only() {
 	$if linux {
 		mut router := bridge.new_router()
 		install_dialog(mut router, sample_ctx())!
-		mut res := router.call_json('main', '1', 'dialog.message', '{"message":"hi"}',
-			grant(['dialog.message']))
-		assert res.err.contains('not implemented')
+		// An unknown command is rejected by the router, before any backend.
+		res := router.call_json('main', '1', 'dialog.nope', '{}',
+			grant(['dialog.nope']))
+		assert res.err.starts_with('unknown method:')
+		// A granted call with bad options is rejected by validation, before
+		// any backend. This is the assertion that matters: it proves the
+		// native layer is not reached, without ever building a widget.
+		mut reg := capabilities.new_registry()
+		reg.grant(capabilities.Capability{
+			id:       'main-only'
+			windows:  ['main']
+			commands: ['dialog.open']
+		})
+		bad := router.call_json('main', '2', 'dialog.open', '{"kind":"nope"}', reg)
+		assert bad.err.starts_with('bad params:')
+		assert bad.result == ''
 	} $else {
-		// Windows has a real backend; dialog_rc/parse_paths are covered
-		// directly, the native call stays manual.
+		// Windows has a real backend that answers with no display at all;
+		// dialog_rc/parse_paths are covered directly, the native call stays
+		// manual.
 		assert parse_paths('a\x00b\x00') == ['a', 'b']
 	}
 }
@@ -359,4 +393,81 @@ fn test_installed_dialog_does_not_leak_other_namespaces() {
 	// dialog.* must not answer to os_info's name
 	res := router.call_json('main', '1', 'os_info.get', '', grant(['os_info.get']))
 	assert res.err.starts_with('unknown method:')
+}
+
+// --- the GTK response mapping (Phase 5b) ---
+//
+// These are the tests that make the Linux dialog half testable at all. The
+// native code answers with a GTK response id; everything the frontend sees is
+// decided by these two functions, and they are pure V so they are checked on
+// the machine CI runs on rather than only where a GTK loop can be spun up.
+
+fn test_gtk_response_ids_map_to_the_same_buttons_windows_reports() {
+	// The mapping the Windows MessageBoxW half hardcodes, in GTK's spelling.
+	// Pinned as pairs because the point is that the two agree: an app that
+	// switches platforms must not have to translate 'yes' into anything.
+	assert gtk_button_name(gtk_response_ok) or { panic('ok') } == button_ok
+	assert gtk_button_name(gtk_response_yes) or { panic('yes') } == button_yes
+	assert gtk_button_name(gtk_response_no) or { panic('no') } == button_no
+	assert gtk_button_name(gtk_response_cancel) or { panic('cancel') } == button_cancel
+}
+
+fn test_every_way_gtk_can_say_no_is_the_same_button() {
+	// The window manager closing the window, the dialog's own close button, the
+	// chooser rejecting a selection and the cancel button are one user intent.
+	// Reporting them separately would push that distinction into every app.
+	for rc in [gtk_response_reject, gtk_response_delete_event, gtk_response_close, gtk_response_cancel] {
+		assert gtk_button_name(rc) or { panic(rc.str()) } == button_cancel, rc.str()
+	}
+}
+
+fn test_gtk_accept_is_reported_as_ok_like_windows_idok() {
+	// A file chooser answers ACCEPT where a message box answers OK, and the
+	// frontend sees 'ok' for both - it asked for a file or for an answer, but
+	// the button it pressed was the accepting one.
+	assert gtk_button_name(gtk_response_accept) or { panic('accept') } == button_ok
+}
+
+fn test_an_unknown_gtk_response_is_not_guessed() {
+	// A custom response id (a button this service did not add) must not be
+	// turned into one of the four names. Reporting 'none' with canceled set is
+	// the honest answer: the frontend sees that its dialog closed without a
+	// choice it recognises.
+	assert gtk_button_name(0) == none
+	assert gtk_button_name(12345) == none
+	res := gtk_message_result(4242)
+	assert res.canceled
+	assert res.button == button_none
+}
+
+fn test_only_ok_and_yes_count_as_accepted() {
+	// The same rule the Windows half applies to IDOK/IDYES: an answer the user
+	// gave is not the same as the absence of one, and 'no' is the interesting
+	// case - it is a real answer and still not an acceptance.
+	assert !gtk_message_result(gtk_response_ok).canceled
+	assert !gtk_message_result(gtk_response_yes).canceled
+	assert gtk_message_result(gtk_response_no).canceled
+	assert gtk_message_result(gtk_response_cancel).canceled
+}
+
+fn test_gtk_message_result_always_reports_a_button_name() {
+	// Whatever GTK answered, `button` is one of the five names - never empty.
+	// An empty string in the Result would be a frontend comparing against ''.
+	for rc in [gtk_response_ok, gtk_response_yes, gtk_response_no, gtk_response_cancel,
+		gtk_response_reject, gtk_response_delete_event, gtk_response_close, 0] {
+		res := gtk_message_result(rc)
+		assert res.button != '', rc.str()
+		assert res.button in [button_ok, button_cancel, button_yes, button_no, button_none], res.button
+	}
+}
+
+fn test_only_accept_means_the_chooser_took_the_files() {
+	// A chooser's ACCEPT is the only answer that carries filenames. Treating
+	// CANCEL as acceptance is how a file dialog returns a path the user never
+	// chose.
+	assert gtk_chooser_accepted(gtk_response_accept)
+	for rc in [gtk_response_cancel, gtk_response_delete_event, gtk_response_reject, gtk_response_close,
+		0] {
+		assert !gtk_chooser_accepted(rc), rc.str()
+	}
 }

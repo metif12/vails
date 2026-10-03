@@ -9,9 +9,11 @@ binary, direct C interop with zero COM code on our side).
 
 > Status: Phases 0–4 E2E ✅ on **Windows** (Edge/WebView2) and **Linux**
 > (WebKitGTK) — screenshots in `tests/e2e_windows/` and
-> `tests/e2e_linux/`. Phase 5 S1 waves 1 and 2 are shipped (ADR-0014/0015):
-> the `dialog`, `os-info`, `clipboard`, `opener` and `notification` services
-> with real Windows backends, Linux backends for `clipboard` + `opener`, the
+> `tests/e2e_linux/`. Phase 5 S1 waves 1–3 are shipped
+> (ADR-0014/0015/0017): the `dialog`, `os-info`, `clipboard`, `opener`,
+> `notification`, `menu` and `tray` services with real Windows backends
+> (including the window host seam, the first OS-initiated events in Vails),
+> Linux backends for `clipboard` + `opener` + `menu` + `tray`, the
 > grant-driven `.d.ts`, and `vails doctor` reporting which backends are
 > native here. macOS comes in Phase 6, mobile is planned (see ROADMAP).
 
@@ -46,13 +48,31 @@ Current state (all verified, not promised):
   Windows E2E proof in `tests/e2e_windows/dialog.png`), **`os-info`**,
   **`clipboard`** (Windows + Linux, E2E round trip on both —
   `tests/e2e_windows/services.png`, `tests/e2e_linux/services.png`),
-  **`opener`** (Windows + Linux, with a scheme allowlist) and
-  **`notification`** (Windows tray balloon, with `is_supported` so a
-  frontend can ask first)
-- `v test .` green on **both** Windows and Linux (29 test files)
-- Planned next: `menu` → `tray` (both need a window-procedure seam, so they
-  get their own ADR), the GTK `dialog`, `notification` on Linux,
-  `window-state` — see ROADMAP.md
+  **`opener`** (Windows + Linux, with a scheme allowlist),
+  **`notification`** (Windows: a real WinRT toast — a proper Action Center
+  notification carrying the app's own name, with `is_supported` so a
+  frontend can ask first and a documented `bundle.identifier` as its
+  AppUserModelID; compile-verified, runtime proof pending — see
+  `docs/ADR/0018`), **`menu`** (native popup on both platforms; the
+  choice arrives as an event, never as the command's result) and
+  **`tray`** (Windows: a shell icon whose click reaches V through a comctl32
+  subclass — `webview/host.v` — and arrives as `tray:clicked`; E2E proof in
+  `tests/e2e_windows/tray.png`)
+- `v test .` green on **Windows** (36 test files) and on **Linux** (32 test
+  files as of 2026-09-28; the four new pure-V modules are OS-agnostic and
+  the Linux count has not been re-measured since — see
+  `tests/e2e_linux/README.md`)
+- Landed since: the window menu bar (`menu.set_menu`, ADR-0023), the tray menu
+  (`tray.set_menu`, ADR-0026) and the GTK `dialog` (ADR-0027)
+- **The build track landed 2026-09-29 (ADR-0034)**: `vails build` produces a
+  binary that *starts* (it stages the five side-by-side DLLs that used to be
+  only a README comment), `--version` stamps it, a `Dockerfile` + a first
+  matrix CI exist, `vails.json` gains a `dependencies` block with
+  `vails.lock`, and the `sql` security policy is code (`sqlreg`) rather than
+  prose. Six corrections came out of it, four of which are in `AGENTS.md` §2b
+  because they will bite the next contributor.
+- Planned next: `notification` on Linux, then `post_to_main` (U0/W0) — see
+  ROADMAP.md
 
 ## Comparison
 
@@ -64,7 +84,7 @@ Current state (all verified, not promised):
 | JS → backend | Bound methods, reflection-based | `invoke` commands (typed) | Bound methods, explicit registration ✅ |
 | Backend → JS | Events | Events + channels | Events ✅ / channels ✅ (T3) |
 | Security model | Open bridge | Capabilities + permissions + scopes | Capabilities ✅ (T1) + service commands as grant names |
-| Services/plugins | Built-in services (v3) | 30+ plugins | Service manifests + 5 services ✅ / dialog, os-info, clipboard, opener, notification (T5, ADR-0014/0015) |
+| Services/plugins | Built-in services (v3) | 30+ plugins | Service manifests + 7 services ✅ / dialog, os-info, clipboard, opener, notification, menu, tray (T5, ADR-0014/0015/0017) |
 | Mobile | v3: Android ✅ / iOS ✅ | Android + iOS | Planned (M0–M4, ADR-0006) |
 | Config file | `build/config.yml` (v3) | `tauri.conf.json` | `vails.json` ✅ (T6) |
 | Build speed | Go toolchain (tens of seconds) | Rust/cargo (minutes) | V + gcc (≈ seconds) ✅ |
@@ -81,15 +101,19 @@ Current state (all verified, not promised):
 | `events/` | Two-way event bus (JS <-> V) + `to_js` snippets |
 | `jsesc/` | JS string-literal escaping shared by bridge/events |
 | `assets/` | Asset serving with traversal protection; `$embed_file` prod / `veb` dev (Phase 3) |
-| `services/` | Services as plugin manifests (T5 ✅, ADR-0014) + `install` path + `support` (per-OS backend report for `doctor`); `dialog` (Windows native), `os_info`, `clipboard` + `opener` (Windows + Linux), `notification` (Windows) |
+| `services/` | Services as plugin manifests (T5 ✅, ADR-0014) + `install` path + `support` (per-OS backend report for `doctor`); `dialog` (Windows native), `os_info`, `clipboard` + `opener` + `menu` + `tray` (Windows + Linux), `notification` (Windows) |
 | `generator/` | `.d.ts` generation for bound methods; `vails dts` drives it from service manifests |
 | `capabilities/` | Per-window command allowlists (T1 ✅, ADR-0007) |
 | `config/` | `vails.json` project config: windows, capabilities, asset root, bundle (T6 ✅, ADR-0008) |
+| `buildinfo/` | The app's build identity: `-d vails_version=` stamping, SemVer validation, the framework version and `v.mod` drift (B0 ✅, ADR-0034) |
+| `buildplan/` | What `vails build` runs and stages, as a value — flags, output name, the five side-by-side DLLs — with the target as an argument so a Linux recipe is asserted on a Windows run (B1 ✅, ADR-0034) |
+| `deps/` | The `dependencies` block + `vails.lock`: Vails declares and reports, VPM resolves (B5 ✅, ADR-0034) |
+| `sqlreg/` | The `sql` security policy as code: a page names a query, V owns the statement (D0 ✅, ADR-0034) |
 | `mobile/` | Mobile entry + no-op stubs (planned, M0) |
-| `cli/` | `vails init/run/build/doctor/dts` |
+| `cli/` | `vails init/run/build/doctor/dts/deps` |
 | `examples/hello/` | Minimal app (window + ping button) |
 | `examples/dialog/` | Two services in one window (native dialogs + os-info) |
-| `examples/services/` | Four services in one window (clipboard, notification, opener, os-info) + the E2E probe vehicle |
+| `examples/services/` | Seven services in one window (clipboard, notification, opener, menu, dialog, tray, os-info) + the E2E probe vehicle |
 | `tests/e2e_windows/` | Manual Edge E2E + proof screenshot |
 | `tests/e2e_linux/` | Headless xvfb script + screenshot |
 | `docs/ADR/` | Architecture decisions (why, not what) |
@@ -173,18 +197,52 @@ cd vails
 v test .                                     # unit tests, all green, no windows opened
 ```
 
+**On Windows with gcc 16 the test command carries one extra flag, and it
+is not optional:**
+
+```powershell
+$env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
+v -cc gcc -ldflags "-lws2_32" test .    # 36 test files
+```
+
+The reason is a V 0.5.2 bug rather than a Vails one: `dev/` imports
+`net.http`, V's `dependency_scan_fallback` link path emits `#flag`-sourced
+`-l` flags *before* most object files, and GNU `ld` only resolves an
+archive against the objects that precede it — so `ws2_32` is on the link
+line and cannot resolve anyway. A `#flag` in the importing module does not
+help (`-ldflags` is emitted last); see ADR-0034 and `AGENTS.md` §1.
+
 `v test .` never opens a window. GUI checks stay manual — see
 `tests/e2e_windows/README.md` and `tests/e2e_linux/README.md`.
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs `v test .` plus a smoke build on both
+platforms per push: Linux inside the repository's `Dockerfile` (V's own
+`thevlang/vlang:ubuntu-build` image, GTK + WebKitGTK + AppIndicator, V
+compiled once as a cached layer), Windows on a native runner with MSYS2
+ucrt64. The Windows job's distinguishing step runs `vails build` and then
+**asserts the five side-by-side DLLs are in the artifact directory** — a
+green CI that ships an `.exe` which cannot start is worse than no CI. A
+`v*` tag additionally triggers a version-stamped release build.
+
+```sh
+docker build -t vails-ci -f Dockerfile .
+docker run --rm vails-ci                   # v test . inside the container
+```
+
 ## Create a new project
 
-The `vails` CLI is minimal on purpose (full scaffolding arrives with Phase 4).
-Today it does five things: `version`, `doctor` (incl. `vails.json` validation),
-`init` (scaffolds `main.v` + `vails.json`), and config-validating `run`/`build`
-dry-runs (real dev-server run is Phase 3, packaging is Phase 7).
+The `vails` CLI is minimal on purpose. It does six things: `version`,
+`doctor` (incl. `vails.json` validation), `init` (scaffolds `main.v` +
+`vails.json`), config-validating `run`, a `build` that produces a binary
+that **starts**, `dts` (grant-driven `.d.ts` + per-service JS) and
+`deps` (the declared dependencies and how they compare to `vails.lock`).
 
 ```sh
 # 1. build the CLI (from the repo root)
+#    Windows + gcc 16 needs two extra flags: the CLI embeds the dev
+#    server, so it imports net and links winsock.
 v -o vails ./cli
 
 # 2. sanity checks
@@ -193,16 +251,26 @@ v -o vails ./cli
 #   v version : check with `v version` (need 0.5.x)
 #   os        : windows | linux | ...
 #   on Linux  : webkit2gtk version or MISSING + apt hint
-#   on Windows: gcc version + webview.h found/MISSING + pacman hint
+#   on Windows: gcc version + webview.h found/MISSING + pacman hint,
+#              and how many of the 5 side-by-side DLLs are present
 #   vails.json: ok | INVALID + reason | not found (optional here)
 #   services  : which services the capabilities grant (T5)
 #   backends  : which services have a NATIVE backend on this machine, and
 #               which granted service is a stub here (ADR-0015)
+#   deps      : what the dependencies block declares, and whether
+#              vails.lock matches it
+#   build     : whether THIS binary was stamped with a version. `dev`
+#              means every update check is silently disabled (ADR-0034)
 
 # 3. scaffold a minimal app (default name: hello)
 ./vails init myapp
 ls myapp                                     # contains main.v + vails.json
 ./vails run --config myapp/vails.json        # dev server + window at its URL
+
+# 4. build it - the five side-by-side DLLs are staged for you, and
+#    --version stamps the binary so `buildinfo.version()` is not 'dev'
+./vails build --config myapp/vails.json --version 1.0.0
+./vails deps  --config myapp/vails.json     # declared vs. resolved
 ```
 
 `vails init <name>` creates `./<name>/main.v` — a single-file window that
@@ -253,21 +321,30 @@ The built-in catalog today, and where each one actually works:
 
 | Service | Commands | Windows | Linux |
 |---|---|---|---|
-| `dialog` | `open` / `save` / `message` | ✅ Common Item Dialog | stub (Phase 5b) |
+| `dialog` | `open` / `save` / `message` | ✅ Common Item Dialog | ✅ GTK (ADR-0027) |
 | `os_info` | `get` | ✅ pure V | ✅ pure V |
 | `clipboard` | `read_text` / `write_text` | ✅ user32 | ✅ GTK clipboard |
 | `opener` | `open_url` / `open_path` | ✅ `ShellExecuteW` | ✅ GIO (no `with`) |
-| `notification` | `notify` / `is_supported` | ✅ tray balloon | stub |
+| `notification` | `notify` / `is_supported` | ✅ WinRT toast (ADR-0018) | stub |
+| `menu` | `popup` / `close` | ✅ `TrackPopupMenuEx` | ✅ `GtkMenu` |
+| `tray` | `set` / `destroy` | ✅ `Shell_NotifyIconW` + click → `tray:clicked` | ✅ StatusNotifierItem (needs a tray host) |
 
 `vails doctor` prints that same table for the machine you are on
-(`backends : 5/5 service(s) native here` on Windows), and
+(`backends : 7/7 service(s) native here` on Windows), and
 `notification.is_supported` lets a frontend ask at runtime instead of firing
 a notification that quietly does nothing.
 
-`v test .` never opens a window, never opens a native dialog, and never
-touches the real clipboard: modal services are the documented exception to
-the "handlers stay fast" rule (ADR-0014), and the clipboard is shared machine
-state — its round trip is proven by `examples/services` instead.
+`menu` and `tray` are the two services that are *driven by the OS* rather than
+by the page (ADR-0017): a native menu choice and a tray click both arrive as
+events — `menu:clicked` / `menu:canceled` and `tray:clicked` — and on Windows
+they reach V through a comctl32 subclass the window host seam installs on
+demand (`webview/host.v`), so an app that uses neither service never gets a
+subclass on its window.
+
+`v test .` never opens a window, never opens a native dialog or menu, and
+never touches the real clipboard or tray: modal services are the documented
+exception to the "handlers stay fast" rule (ADR-0014), and the clipboard is
+shared machine state — its round trip is proven by `examples/services` instead.
 
 Project config (`vails.json` with windows list, capabilities, asset roots,
 bundle settings) is live (T6, ADR-0008): `vails init` scaffolds it,
@@ -312,8 +389,8 @@ v -cc gcc -o dialog.exe ./examples/dialog    # same 5 DLLs next to the exe
 grants. `VAILS_DIALOG_PROBE=open|multi|save|message|host` makes the page
 call that command on load — the E2E hook used for the proof below (a
 synthetic click does not reach WebView2 content). On Linux the dialog
-service reports `not implemented` until Phase 5b; `os_info` works
-everywhere.
+service is real as of ADR-0027 — a call made with no display is refused
+with a message saying so, and `os_info` works everywhere.
 
 ## Run the services example (clipboard / opener / notification)
 
@@ -391,12 +468,19 @@ Rules that matter daily:
 | `hello.exe` exits silently / WebView2 error | Install Edge WebView2 Runtime; copy the 5 DLLs next to the exe | `tests/e2e_windows/README.md` |
 | `services/` fails to build on Windows | It holds a `.c.v`: needs MSYS2 gcc (same as `webview/`). `v test ./services` fails without it | ADR-0014, `vails doctor` |
 | `dialog.*` rejects with `forbidden:` | The capability in `vails.json` does not grant that command (names are `dialog.open`, …) | ADR-0007/0014 |
-| `dialog.*` says `not implemented` on Linux | Expected until Phase 5b; the GTK chooser is the last S1 item waiting on a human | ROADMAP Phase 5b |
-| `notification.notify` says `not implemented` on Linux | Expected: a Windows tray balloon has no Linux equivalent yet. Ask `notification.is_supported` first — it answers `false` there | ADR-0015, ROADMAP Phase 5b |
+| `dialog.*` says `no display available` on Linux | The app has no `DISPLAY` (headless). GTK needs `gtk_init` first, so the service refuses with a message naming the cause rather than crashing | ADR-0027 |
+| A right click on a tray icon with a menu attached stops emitting `tray:clicked` | That is the contract: the menu owns the right click. Apps that never call `tray.set_menu` are unaffected | ADR-0026 |
+| `notification.notify` says `not implemented` on Linux | Expected: the Windows backend is a WinRT toast, which has no Linux equivalent yet. Ask `notification.is_supported` first — it answers `false` there | ADR-0015/0018, ROADMAP Phase 5b |
+| `notification.notify` says `no app identity` | `vails.json` has no `bundle.identifier`, and a desktop app cannot raise a toast without an AppUserModelID. `vails init` scaffolds one; `vails doctor` warns about it too | ADR-0018 |
+| `notification.notify` says `the Windows toast could not be shown (…hr=0x80040154)` | The machine has no WinRT runtime (a stripped/Server-style Windows image): `CLASS_E_CLASSNOTAVAILABLE`, so no WinRT class can be activated. Not a Vails bug — check for `C:\Windows\System32\Windows.Foundation.dll` | ADR-0018 |
 | A page renders but every button is disabled ("preview mode") | `window.vails` was never injected: the bridge is not wired on this platform/build | ADR-0015 (the Linux transport was declared, not connected) |
 | A Linux app fails to build with a `-Wincompatible-pointer-types` / implicit-declaration error | gcc 14+ treats those as errors; a V function pointer is not a WebKit callback, and some WebKit getters are not public in your version — read the installed headers | `webview/webview_linux_shim.h`, ADR-0015 Notes |
 | A service's params arrive empty although the `.d.ts` type-checks | The wire names are the V field names: `default_path`, not `defaultPath` | ADR-0015, `dialog_test.v` |
 | `vails doctor` shows a service as `stub` | It is honest: this platform has no backend for it yet (the note says which phase) | ADR-0015, `services/support.v` |
+| A Linux build of `services/` fails on `app_indicator_*` | `sudo apt install libayatana-appindicator3-dev` (needed by the `tray` backend) | ADR-0017, `tests/e2e_linux/README.md` |
+| The tray icon is installed but invisible on Linux | There is no StatusNotifierHost in a headless session; the item is registered, nothing draws it. `dbus-run-session` is also needed for the D-Bus registration | ADR-0017, `tray_support()` |
+| A menu or tray answer never arrives | Both are *events*, not command results — listen for `menu:clicked` / `menu:canceled` / `tray:clicked` with `onEvent`. On Linux the tray has no click event at all (the host opens the item's menu) | ADR-0017 |
+| `v test` on Linux hangs on a file that builds a `Backend` | A V 0.5.2 C-codegen problem with a closure inside a `map[string]fn` in a *test* build (the same code compiles in seconds in an app build) | ADR-0017 Notes, `tests/e2e_linux/README.md` |
 | Linux GUI crash / GC fork errors | Always build GUI apps with `-gc none` | ADR-0005, `examples/hello/main.v` header |
 | Black/blank window under Wayland | `unset WAYLAND_DISPLAY`, `GDK_BACKEND=x11`, `WEBKIT_DISABLE_COMPOSITING_MODE=1` | `AGENTS.md §1`, `run_headless.sh` |
 | `frontend/index.html not found` | Run from the repo root or the example dir so `load_frontend_html` finds its candidates | `examples/hello/main.v` |

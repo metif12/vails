@@ -38,6 +38,8 @@ fn C.gtk_window_set_title(window voidptr, title &char)
 fn C.gtk_window_set_default_size(window voidptr, width int, height int)
 fn C.gtk_widget_show_all(widget voidptr)
 fn C.gtk_container_add(container voidptr, widget voidptr)
+fn C.gtk_box_new(orientation int, spacing int) voidptr
+fn C.gtk_box_pack_start(box voidptr, child voidptr, expand bool, fill bool, padding int)
 fn C.webkit_web_view_new() voidptr
 fn C.webkit_web_view_load_html(view voidptr, content &char, base_uri &char)
 fn C.webkit_web_view_load_uri(view voidptr, uri &char)
@@ -66,10 +68,21 @@ fn C.gtk_widget_get_visible(widget voidptr) int
 // after gtk_widget_show_all.
 fn C.gtk_widget_get_window(widget voidptr) voidptr
 
+// GTK_ORIENTATION_VERTICAL (1) and GDK_WINDOW_TYPE_HINT (0) as literals
+// (AGENTS.md §2). gtk_window_new is called with 0, which is GTK_WINDOW_TOPLEVEL.
+const gtk_orientation_vertical = 1
+const gtk_window_toplevel = 0
+
 // destroy_cb runs on window close and stops the GTK main loop.
 // Plain top-level fn (no captures) so it can cross the C boundary.
+// destroy_cb runs on window close. It hands over to the shim's counter, which
+// quits the GTK main loop only when the LAST window closed (F0) — the single
+// window version called gtk_main_quit unconditionally, which was correct with
+// one window and is "closing the settings window quits the app" with two.
+//
+// Plain top-level fn (no captures) so it can cross the C boundary.
 fn destroy_cb() {
-	C.gtk_main_quit()
+	C.vails_window_closed()
 }
 
 // js_trampoline is the V end of the V->JS completion callback. It runs on the
@@ -124,19 +137,26 @@ fn message_cb(result voidptr, data voidptr) {
 	}
 }
 
-fn run_linux(cfg Config) ! {
-	argc := 0
-	C.gtk_init(&argc, unsafe { nil })
+// build_linux_window constructs one window and everything hanging off it, and
+// fills in the registry's Window. Deliberately NOT a thread: GTK wants one
+// main loop for the process, so N windows are N GtkWindows in one loop
+// (webview_linux_shim.h, "N windows on ONE GTK main loop").
+//
+// Returns the DispatchCtx so run_linux can free it after the loop ends. That
+// is one context per window, each carrying ITS OWN label, which is what makes
+// a command called from the settings window gated against the settings
+// window's capabilities (F0 makes that load-bearing).
+fn build_linux_window(cfg Config, win &Window) &DispatchCtx {
 	// GTK_WINDOW_TOPLEVEL == 0
 	window := C.gtk_window_new(0)
 	if window == unsafe { nil } {
-		return error('vails: gtk_window_new failed')
+		return unsafe { nil }
 	}
 	C.gtk_window_set_title(window, cfg.title.str)
 	C.gtk_window_set_default_size(window, cfg.width, cfg.height)
 	view := C.webkit_web_view_new()
 	if view == unsafe { nil } {
-		return error('vails: webkit_web_view_new failed')
+		return unsafe { nil }
 	}
 	// The bridge: a heap context the signal callback ferries back to us, the
 	// script-message channel, and the runtime injected as a user script (the
@@ -150,17 +170,31 @@ fn run_linux(cfg Config) ! {
 		reg:    cfg.registry
 	}
 	unsafe {
+		// The shim's trampoline needs the V function's address before any eval
+		// can happen. Done per window rather than once per process: it is the
+		// same address every time, and doing it here means a window built later
+		// cannot be the one that forgot.
 		C.vails_js_set_target(voidptr(js_trampoline))
 		C.vails_message_set_target(voidptr(message_cb))
 		manager := C.webkit_web_view_get_user_content_manager(view)
 		if C.vails_message_connect(manager, c'vails', voidptr(ctx)) == 0 {
 			free(ctx)
-			return error('vails: could not register the vails script message handler')
+			return unsafe { nil }
 		}
-		C.vails_add_runtime(manager, bridge.runtime_js().str)
+		C.vails_add_runtime(manager, label_js(bridge.runtime_js(), cfg.label))
 		C.g_signal_connect_data(window, c'destroy', voidptr(destroy_cb), nil, nil, 0)
 	}
-	C.gtk_container_add(window, view)
+	// The webview goes into a vertical box rather than straight into the
+	// window. A GtkWindow holds exactly one child, so with the view as that
+	// child a window menu bar (menu.set_menu) has nowhere to go and would have
+	// to rebuild the window's whole child tree. The box makes the layout
+	// explicit instead: row 0 is reserved for a menu bar and the view takes the
+	// rest. With no bar ever set, the view still gets the full client area,
+	// because the box has no other visible child (expand + fill, no padding).
+	// GTK_ORIENTATION_VERTICAL is 1.
+	box := C.gtk_box_new(gtk_orientation_vertical, 0)
+	C.gtk_container_add(window, box)
+	C.gtk_box_pack_start(box, view, true, true, 0)
 	if cfg.url.len > 0 {
 		C.webkit_web_view_load_uri(view, cfg.url.str)
 	} else {
@@ -171,28 +205,95 @@ fn run_linux(cfg Config) ! {
 		}
 		C.webkit_web_view_load_html(view, html.str, unsafe { nil })
 	}
-	unsafe {
-		C.g_signal_connect_data(window, c'destroy', voidptr(destroy_cb), nil, nil, 0)
-		// The shim's trampoline needs the V function's address once, before
-		// any eval can happen.
-		C.vails_js_set_target(voidptr(js_trampoline))
-	}
-	C.gtk_widget_show_all(window)
-	// Services (Phase 5) get the eval path + the GdkWindow as parent.
-	// Runs after show_all: the GdkWindow is NULL until the widget is
-	// realized, and before gtk_main takes over the loop.
-	if on_ready := cfg.on_ready {
-		on_ready(Ctx{
-			label:   cfg.label
-			eval_fn: fn [view] (js string) ! {
-				unsafe {
-					C.vails_run_javascript(view, js.str)
-				}
+	// Services (Phase 5) get the eval path, the GdkWindow as `parent` and the
+	// GtkWindow as `toplevel`. Runs before the loop starts: the GdkWindow is
+	// NULL until the widget is realized.
+	//
+	// The job seam (U0) is created here too and carried on the same Ctx, and
+	// the Ctx is built into a local first so this file reads the same way the
+	// Windows one does. install_wakeup is a no-op on Linux today — the
+	// g_idle_add half is unwritten, and post_to_main refuses by name — but the
+	// call is already in the right place, so writing that half changes
+	// install_wakeup and post_to_main only, not this backend.
+	mt := new_main_thread()
+	wctx := Ctx{
+		label:    cfg.label
+		eval_fn:  fn [view] (js string) ! {
+			unsafe {
+				C.vails_run_javascript(view, js.str)
 			}
-			parent:  C.gtk_widget_get_window(window)
-		})
+		}
+		parent:   C.gtk_widget_get_window(window)
+		toplevel: window
+		main:     mt
+	}
+	mt.install_wakeup(wctx) or {
+		eprintln('webview[' + cfg.label + ']: the main-thread job wakeup is ' +
+			'unavailable: ' + err.msg())
+	}
+	win.ctx = wctx
+	win.native = view
+	win.state = .ready
+	// on_window BEFORE on_ready, for the same reason as the Windows backend.
+	if on_window := cfg.on_window {
+		on_window(win)
+	}
+	if on_ready := cfg.on_ready {
+		on_ready(wctx)
+	}
+	win.state = .running
+	return ctx
+}
+
+// run_linux builds every window, then runs ONE GTK main loop for all of them.
+//
+// The loop ends when the last window closes, not the first — see destroy_cb and
+// the shim's counter. The single-window case is this with a one-element list,
+// which is why `run` and `run_many` share this backend.
+fn run_linux(cfgs []Config) ! {
+	argc := 0
+	C.gtk_init(&argc, unsafe { nil })
+	// The registry is built and validated before a single GtkWindow exists, so
+	// a duplicate or empty label is refused without anything appearing on
+	// screen. An app that asked for two windows called "main" should not get
+	// one window up and then an error.
+	reg := new_registry()
+	for cfg in cfgs {
+		cfg.validate()!
+		reg.add(new_window(cfg.label)) or { return err }
+	}
+	// Build them all before the loop starts: on_ready for window 2 must not run
+	// while window 1's loop is already spinning, and GTK wants every window
+	// realized before the first iteration.
+	contexts := []&DispatchCtx{}
+	for cfg in cfgs {
+		win := reg.find(cfg.label)
+		C.vails_window_opened()
+		ctx := build_linux_window(cfg, win)
+		if ctx == unsafe { nil } {
+			// Roll the counter back: a run that never reaches gtk_main must
+			// not leave the process believing a window is still open.
+			C.vails_window_closed()
+			return error('vails: could not build the window "' + cfg.label + '"')
+		}
+		contexts << ctx
+	}
+	for cfg in cfgs {
+		win := reg.find(cfg.label)
+		unsafe {
+			C.gtk_widget_show_all(win.native)
+		}
 	}
 	C.gtk_main()
-	// The webview is gone with the window; the dispatch context is ours.
-	unsafe { free(ctx) }
+	// The loop has returned, so no window is left: mark them all closed and
+	// free the per-window dispatch contexts. The eval closures died with their
+	// views, so the registry's Windows are only labels now.
+	for cfg in cfgs {
+		reg.find(cfg.label).state = .closed
+	}
+	for c in contexts {
+		unsafe {
+			free(c)
+		}
+	}
 }

@@ -19,6 +19,9 @@ fn test_default_config_validates() {
 	assert cfg.asset_root == 'frontend'
 	assert cfg.bundle.name == 'demo'
 	assert cfg.bundle.windows_dll_side_by_side == true
+	// the scaffold carries a usable AppUserModelID, not an empty one
+	assert cfg.bundle.identifier == 'demo'
+	validate_identifier(cfg.bundle.identifier)!
 	w := cfg.window('main')!
 	assert w.title == 'demo'
 	assert w.width == 1024
@@ -66,6 +69,72 @@ fn test_window_unknown_label_fails() {
 	mut failed := false
 	cfg.window('settings') or { failed = true }
 	assert failed
+}
+
+// The identifier is the Windows AppUserModelID (ADR-0018), so these are
+// the shell's rules rather than ours. Tested here, in pure V, because the
+// failure they prevent - a toast that never appears - is otherwise only
+// visible by eye on a machine with the notification area open.
+fn test_validate_identifier_accepts_real_aumids() {
+	for ok in ['vails.app', 'com.example.MyApp', 'a', 'my-app_1.2', '9'] {
+		validate_identifier(ok)!
+	}
+	// empty is legal: nothing but notification needs an identity
+	validate_identifier('')!
+}
+
+fn test_validate_identifier_rejects() {
+	// a space is the classic AUMID bug: the shell matches exactly
+	check_invalid_identifier('my app')
+	// separators the shell does not accept
+	check_invalid_identifier('my/app')
+	check_invalid_identifier('my\\app')
+	check_invalid_identifier('my:app')
+	// non-ASCII: the AUMID is compared as a byte string
+	check_invalid_identifier('café')
+	// leading / trailing period
+	check_invalid_identifier('.leading')
+	check_invalid_identifier('trailing.')
+	check_invalid_identifier('.')
+	// over the documented 128-character ceiling
+	check_invalid_identifier('a'.repeat(max_identifier + 1))
+	// ...and exactly at it is still fine
+	validate_identifier('a'.repeat(max_identifier))!
+}
+
+fn check_invalid_identifier(id string) {
+	mut failed := false
+	validate_identifier(id) or { failed = true }
+	assert failed, 'must reject "' + id + '"'
+}
+
+fn test_default_identifier_sanitizes_an_app_name() {
+	// the shape an author actually types
+	assert default_identifier('Vails Services Demo') == 'vailsservicesdemo'
+	// punctuation and spaces are dropped rather than encoded
+	assert default_identifier('My App!') == 'myapp'
+	// dots survive, so a reverse-DNS name is passed through intact
+	assert default_identifier('com.example.App') == 'com.example.app'
+	// and it never produces something validate_identifier would reject
+	for name in ['Hello Vails', 'My App!', '...', '   ', '!!!', 'A-B_C.1', 'x'.repeat(200)] {
+		validate_identifier(default_identifier(name))!
+	}
+}
+
+fn test_default_identifier_falls_back_when_nothing_is_usable() {
+	// an all-rejected name would otherwise produce an empty - and so
+	// invalid - AUMID
+	assert default_identifier('!!!') == 'vails.app'
+	assert default_identifier('   ') == 'vails.app'
+	assert default_identifier('') == 'vails.app'
+}
+
+fn test_default_identifier_strips_edge_periods_and_bounds_length() {
+	// validate_identifier rejects a leading/trailing '.', so the builder
+	// has to remove them
+	assert default_identifier('.hidden.') == 'hidden'
+	// and the result can never exceed the ceiling
+	assert default_identifier('x'.repeat(500)).len <= max_identifier
 }
 
 fn test_to_registry_gates_dispatch() {

@@ -20,7 +20,7 @@ fn test_manifest_shape() {
 	assert m.commands[0].params == 'NotificationOptions'
 	// is_supported takes no params, so the install path wires validate_empty
 	assert m.commands[1].params == no_params
-	// a balloon does not block the main thread: the shell owns the UI
+	// a toast does not block the main thread: the shell owns the UI
 	assert !m.commands[0].blocking
 }
 
@@ -78,6 +78,20 @@ fn test_validate_enforces_the_string_bounds() {
 		body:       'b'
 		timeout_ms: -5
 	})!
+	// a NUL would truncate the string inside the C call, and a truncation
+	// the frontend did not ask for is worse than a rejection
+	failed = false
+	validate_notification(NotificationOptions{
+		title: 'a\x00b'
+		body:  'b'
+	}) or { failed = true }
+	assert failed
+	failed = false
+	validate_notification(NotificationOptions{
+		title: 'a'
+		body:  'b\x00c'
+	}) or { failed = true }
+	assert failed
 }
 
 fn test_clamp_timeout() {
@@ -114,14 +128,110 @@ fn test_with_clamped_timeout_returns_a_clamped_copy() {
 	}).timeout_ms == max_timeout
 }
 
-// The validated byte bound is deliberately wider than the shell's fixed
-// fields (256 UTF-16 units for the body, 64 for the title): a long
-// notification is shown with a clipped tail instead of being refused, which
-// is what notification APIs do everywhere. This pins the relationship so a
-// future bound change is a deliberate decision.
-fn test_shell_field_is_narrower_than_the_validated_bound() {
-	assert max_notify_body > 255
-	assert max_notify_title > 63
+// The bounds are byte counts on the *validated* value. Unlike the balloon
+// this replaced, a WinRT toast has no fixed-width shell field to clip
+// against, so the bound is the only limit the frontend can count on - which
+// is why it is tested here rather than left implicit.
+fn test_the_bound_is_the_only_limit_on_a_toast() {
+	assert max_notify_body > 0
+	assert max_notify_title > 0
+	assert max_notify_title < max_notify_body
+}
+
+fn test_escape_xml_escapes_the_five_entities() {
+	// '&' and '<' are the two that actually break the document
+	assert escape_xml('a & b') == 'a &amp; b'
+	assert escape_xml('<b>') == '&lt;b&gt;'
+	assert escape_xml('"q"') == '&quot;q&quot;'
+	assert escape_xml("it's") == 'it&apos;s'
+	// all of them at once, in input order. The real invariant is that the
+	// '&' we *emit* is never itself escaped - a single-pass matcher
+	// guarantees that, and this is the assertion that would catch a
+	// two-pass implementation producing '&amp;amp;'.
+	assert escape_xml('<&">') == '&lt;&amp;&quot;&gt;'
+	assert !escape_xml('&').contains('&amp;amp;')
+}
+
+fn test_escape_xml_leaves_ordinary_text_alone() {
+	// The document is UTF-8 end to end, so non-ASCII is not escaped -
+	// escaping it would be both wrong and unreadable.
+	for s in ['hello', 'Vails', 'héllo wörld', 'done 🌱', 'line1\nline2', '100% ok'] {
+		assert escape_xml(s) == s
+	}
+	// and the empty string is a fixed point
+	assert escape_xml('') == ''
+}
+
+fn test_toast_duration_maps_the_clamped_timeout() {
+	assert toast_duration(min_timeout) == 'short'
+	assert toast_duration(default_timeout) == 'short'
+	assert toast_duration(long_duration_timeout - 1) == 'short'
+	assert toast_duration(long_duration_timeout) == 'long'
+	assert toast_duration(max_timeout) == 'long'
+	// out-of-range values still land on one of the two, because
+	// toast_xml clamps before calling this
+	assert toast_duration(0) == 'short'
+	assert toast_duration(max_timeout * 10) == 'long'
+}
+
+fn test_toast_xml_emits_the_generic_template_with_both_texts() {
+	xml := toast_xml(NotificationOptions{
+		title: 'Vails probe'
+		body:  'Notification from the page.'
+	})
+	assert xml.starts_with('<toast duration="short">')
+	assert xml.contains('template="ToastGeneric"')
+	// title first, body second: that is the order the template renders
+	assert xml.index('Vails probe') or { -1 } < xml.index('Notification from the page.') or {
+		-1
+	}
+	assert xml.ends_with('</toast>')
+	assert xml.contains('<text>Vails probe</text>')
+}
+
+fn test_toast_xml_omits_an_empty_title() {
+	// A blank first line is how ToastGeneric says "no heading", so
+	// emitting an empty <text> anyway is what puts a mysterious gap above
+	// a body-only notification.
+	xml := toast_xml(NotificationOptions{
+		body: 'just a body'
+	})
+	assert !xml.contains('<text></text>')
+	assert xml.contains('<text>just a body</text>')
+	// exactly one text node, not two
+	assert xml.count('<text>') == 1
+}
+
+fn test_toast_xml_escapes_both_strings() {
+	// The whole point of building the document in pure V: an unescaped
+	// '<' from a frontend produces a document the shell refuses, and the
+	// symptom (nothing appears) points nowhere near the cause.
+	xml := toast_xml(NotificationOptions{
+		title: '5 < 6 & rising'
+		body:  'if a < b then "yes"'
+	})
+	assert !xml.contains('<b>')
+	assert xml.contains('5 &lt; 6 &amp; rising')
+	assert xml.contains('if a &lt; b then &quot;yes&quot;')
+	// and the result is still a document with a plausible shape
+	assert xml.starts_with('<toast ')
+	assert xml.ends_with('</toast>')
+}
+
+fn test_toast_xml_carries_the_clamped_duration() {
+	// The timeout's one surviving effect: the toast asks the shell for the
+	// longer of the two on-screen durations it offers.
+	long_xml := toast_xml(NotificationOptions{
+		body:       'b'
+		timeout_ms: max_timeout * 10
+	})
+	assert long_xml.contains('duration="long"')
+	// out-of-range low values clamp up rather than producing a third state
+	short_xml := toast_xml(NotificationOptions{
+		body:       'b'
+		timeout_ms: -1
+	})
+	assert short_xml.contains('duration="short"')
 }
 
 fn test_is_supported_is_true_only_where_a_backend_exists() {
@@ -144,18 +254,48 @@ fn test_notify_rejects_a_bad_payload_with_the_standard_prefix() {
 	too_long := NotificationOptions{
 		body: 'b'.repeat(max_notify_body + 1)
 	}
-	notify(ctx, too_long) or {
+	notify(ctx, probe_identity(), too_long) or {
 		failed = true
 		assert err.msg().starts_with('bad params:')
 	}
 	assert failed
 }
 
+// The identity a test uses: a well-formed AUMID, so a failure can only come
+// from the notification itself and not from a missing bundle.identifier.
+// Not named test_* : V would parse it as a test function and reject its
+// return type (same trap ADR-0015 records about per-file test helpers).
+fn probe_identity() AppIdentity {
+	return AppIdentity{
+		id:           'com.vails.test'
+		display_name: 'Vails Test'
+	}
+}
+
+// No AppUserModelID is refused with a message that names the config field.
+// A toast raised with no identity is the silent failure this service exists
+// to avoid, so guessing an id is not an option.
+fn test_notify_without_an_identity_fails_loudly() {
+	$if windows {
+		ctx := webview.Ctx{
+			label: 'main'
+		}
+		mut failed := false
+		notify(ctx, AppIdentity{}, NotificationOptions{
+			body: 'hello'
+		}) or {
+			failed = true
+			assert err.msg().contains('bundle.identifier')
+		}
+		assert failed, 'an empty AppUserModelID must be an error, not a guess'
+	}
+}
+
 fn test_install_binds_both_commands() {
 	mut router := bridge.new_router()
 	install_notification(mut router, webview.Ctx{
 		label: 'main'
-	})!
+	}, probe_identity())!
 	reg := notify_grant(['notification.notify', 'notification.is_supported'])
 	// is_supported answers without touching a native half, so this is a real
 	// end-to-end check of the binding: a JSON boolean, ready for JSON.parse
@@ -172,7 +312,7 @@ fn test_install_denies_an_ungranted_command() {
 	mut router := bridge.new_router()
 	install_notification(mut router, webview.Ctx{
 		label: 'main'
-	})!
+	}, probe_identity())!
 	res := router.call_json('main', '1', 'notification.notify', '{"body":"hi"}',
 		notify_grant(['notification.is_supported']))
 	assert res.err.starts_with('forbidden:')

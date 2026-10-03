@@ -133,7 +133,7 @@
 <main>
   <header>
     <h1>Vails Services Demo</h1>
-    <p class="subtitle">Four services, one window: <code>clipboard</code>, <code>opener</code>, <code>notification</code> and <code>os_info</code>.</p>
+    <p class="subtitle">Seven services, one window: <code>clipboard</code>, <code>opener</code>, <code>notification</code>, <code>menu</code>, <code>dialog</code>, <code>tray</code> and <code>os_info</code>. Wave 3 of Phase 5 S1 added <code>menu</code> and <code>tray</code> (ADR-0017); wave 4 added the window menu bar, the tray menu and the GTK dialogs (ADR-0023, ADR-0026, ADR-0027).</p>
   </header>
 
   <section>
@@ -150,7 +150,7 @@
 
   <section>
     <h2>Notification</h2>
-    <p class="note"><code>is_supported</code> first, so the page never fires a notification that quietly does nothing. Windows shows a tray balloon; other platforms report the stub.</p>
+    <p class="note"><code>is_supported</code> first, so the page never fires a notification that quietly does nothing. Windows shows a real WinRT toast, attributed to this app's <code>bundle.identifier</code>; other platforms report the stub. <code>notify</code> resolves with the mechanism that ran, so the status line below is the proof.</p>
     <div class="row">
       <button class="primary" id="notify" type="button">Notify</button>
       <button id="notify-support" type="button">Ask is_supported</button>
@@ -177,6 +177,53 @@
       <button id="open-blocked" type="button">Try it anyway</button>
     </div>
     <output id="open-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>Menu</h2>
+    <p class="note">A native popup, parented to nothing and owned by the window. The choice comes back as an <code>menu:clicked</code> event &mdash; never as the command's result &mdash; so one contract serves Windows' modal <code>TrackPopupMenuEx</code> and Linux' immediate <code>GtkMenu</code>. The same button installs the window's <em>menu bar</em>, which is not modal at all and answers on the same event.</p>
+    <div class="row">
+      <button class="primary" id="menu-popup" type="button">Open popup menu</button>
+      <button id="menu-close" type="button">Close it</button>
+      <button id="menu-set-menu" type="button">Install window menu bar</button>
+    </div>
+    <output id="menu-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>Dialog service</h2>
+    <p class="note">Native file, save and message dialogs. All three are <code>blocking: true</code> in the manifest, which is the ADR-0014 exception: a modal dialog runs a nested loop, so the calling thread parks until the user answers. A <code>canceled</code> result is a normal answer, not an error — only a genuine failure rejects.</p>
+    <div class="row">
+      <button class="primary" id="dialog-open" type="button">Open file...</button>
+      <button id="dialog-save" type="button">Save as...</button>
+      <button id="dialog-message" type="button">Show a message</button>
+    </div>
+    <output id="dialog-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>Tray</h2>
+    <p class="note">An icon in the notification area, installed with <code>tray.set</code>. Clicks are OS-initiated messages that reach V through the window host seam (a comctl32 subclass) and arrive as <code>tray:clicked</code>. <code>tray.set_menu</code> attaches a menu to the icon instead: a right click then opens that menu and the choice arrives as <code>menu:clicked</code> — the same event every other menu in Vails uses.</p>
+    <div class="row">
+      <button class="primary" id="tray-set" type="button">Install tray icon</button>
+      <button id="tray-set-menu" type="button">Attach a menu to it</button>
+      <button id="tray-destroy" type="button">Remove it</button>
+    </div>
+    <output id="tray-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>main-thread post (U0)</h2>
+    <p>A worker computes a result and hands it to the window thread, which runs
+    it and emits to the page. Before U0 the worker dropped the result on the
+    floor, because <code>ctx.emit</code> ends in <code>webview_eval</code> on a
+    thread the webview object does not own.</p>
+    <p class="note">The proof is started from the V side
+    (<code>VAILS_SERVICES_PROBE=post</code>), not from this button: a worker is
+    spawned in <code>on_ready</code> and only then has anything to post back. The
+    line below changes on its own when the round trip lands &mdash; nothing here
+    is waiting on a click.</p>
+    <output id="post-status" role="status"></output>
   </section>
 
   <section>
@@ -215,6 +262,18 @@
   var nsNote = v.notification = v.notification || {};
   nsNote.notify = function (params) { return v.call("notification.notify", params || ""); };
   nsNote.is_supported = function (params) { return v.call("notification.is_supported", params || ""); };
+  var nsMenu = v.menu = v.menu || {};
+  nsMenu.popup = function (params) { return v.call("menu.popup", params || ""); };
+  nsMenu.close = function (params) { return v.call("menu.close", params || ""); };
+  nsMenu.set_menu = function (params) { return v.call("menu.set_menu", params || ""); };
+  var nsDialog = v.dialog = v.dialog || {};
+  nsDialog.open = function (params) { return v.call("dialog.open", params || ""); };
+  nsDialog.save = function (params) { return v.call("dialog.save", params || ""); };
+  nsDialog.message = function (params) { return v.call("dialog.message", params || ""); };
+  var nsTray = v.tray = v.tray || {};
+  nsTray.set = function (params) { return v.call("tray.set", params || ""); };
+  nsTray.set_menu = function (params) { return v.call("tray.set_menu", params || ""); };
+  nsTray.destroy = function (params) { return v.call("tray.destroy", params || ""); };
   var nsInfo = v.os_info = v.os_info || {};
   nsInfo.get = function (params) { return v.call("os_info.get", params || ""); };
   // --- end vails dts --js output -----------------------------------------
@@ -229,14 +288,54 @@
   var openBlockedBtn = $("open-blocked");
   var notifyBtn = $("notify");
   var notifySupportBtn = $("notify-support");
+  var menuPopupBtn = $("menu-popup");
+  var menuCloseBtn = $("menu-close");
+  var menuSetMenuBtn = $("menu-set-menu");
+
+  var traySetBtn = $("tray-set");
+  var traySetMenuBtn = $("tray-set-menu");
+  var trayDestroyBtn = $("tray-destroy");
+
+  var dialogOpenBtn = $("dialog-open");
+  var dialogSaveBtn = $("dialog-save");
+  var dialogMessageBtn = $("dialog-message");
+  var dialogStatus = $("dialog-status");
   var hostBtn = $("host");
   var forbiddenBtn = $("forbidden");
   var clipStatus = $("clip-status");
   var openStatus = $("open-status");
   var notifyStatus = $("notify-status");
+  var menuStatus = $("menu-status");
+  var trayStatus = $("tray-status");
+  var postStatus = $("post-status");
   var hostStatus = $("host-status");
   var forbiddenStatus = $("forbidden-status");
   var factsEl = $("facts");
+
+  // The items the popup button shows. Same shape a real frontend sends as
+  // JSON; it is inlined here because the page carries no build step.
+  var menuItems = [
+    { id: "open", label: "Open file..." },
+    { id: "save", label: "Save as...", enabled: false },
+    { separator: true },
+    { id: "file", label: "File", children: [
+      { id: "file/new", label: "New" },
+      { id: "file/quit", label: "Quit" }
+    ] },
+    { separator: true },
+    { id: "about", label: "About Vails" }
+  ];
+
+  // resolveProbe hands the payload the page is waiting for to the pending
+  // promise the E2E probe parked on. The probe resolves on an event, not on a
+  // command result, because the native answer arrives out of band (ADR-0017).
+  function resolveProbe(payload) {
+    var pending = window.__vailsResolve;
+    if (!pending) { return false; }
+    window.__vailsResolve = null;
+    pending(payload);
+    return true;
+  }
 
   function setStatus(el, text, cls) {
     el.className = cls || "";
@@ -258,7 +357,37 @@
   // The E2E probe (VAILS_SERVICES_PROBE in main.v) resolves into this
   // event instead of a click, so a screenshot can prove the loop.
   window.vails.onEvent = window.vails.onEvent || function () {};
+
+  // The three OS-initiated events, registered here (before the E2E probe runs,
+  // because the probe is injected at the end of the document) and the only
+  // place a native menu choice or tray click becomes visible to a frontend.
+  //
+  // NB: nothing inside a script element may spell a closing body or script tag
+  // in a comment or a string. main.v's inject_before_body() looks for one, and
+  // a mention in a comment made it inject the probe *inside* this script
+  // element - which closed it early and dumped the rest of the file as page
+  // text. Use "the end of the body", not the markup.
   if (hasBackend) {
+    window.vails.onEvent("menu:clicked", function (raw) {
+      var click = parse(raw);
+      setStatus(menuStatus, "chose: " + click.id, "ok");
+      resolveProbe("menu:clicked " + click.id);
+      menuStatus.scrollIntoView({ block: "center" });
+    });
+    window.vails.onEvent("menu:canceled", function () {
+      setStatus(menuStatus, "dismissed (no item chosen) - an event, not an error", "");
+      resolveProbe("menu:canceled");
+      // Same scroll as the clicked branch: a dismissal is an answer too, and
+      // on a headless run it is the ONLY answer there is, so leaving the page
+      // at the top would hide the proof this whole panel exists to give.
+      menuStatus.scrollIntoView({ block: "center" });
+    });
+    window.vails.onEvent("tray:clicked", function (raw) {
+      var click = parse(raw);
+      setStatus(trayStatus, "clicked: " + click.button, "ok");
+      resolveProbe("tray:clicked " + click.button);
+      trayStatus.scrollIntoView({ block: "center" });
+    });
     window.vails.onEvent("probe:done", function (raw) {
       var res;
       try { res = JSON.parse(raw); } catch (e) { setStatus(clipStatus, String(raw), "bad"); return; }
@@ -281,7 +410,10 @@
       // offset after load, and a proof screenshot has to show the panel the
       // proof is in.
       var panel = res.probe === "opener" ? openStatus :
-                  res.probe === "notification" ? notifyStatus : clipStatus;
+                  res.probe === "notification" ? notifyStatus :
+                  res.probe === "menu" ? menuStatus :
+                  res.probe === "tray" ? trayStatus :
+                  res.probe === "post" ? postStatus : clipStatus;
       setStatus(panel, text, res.ok ? "ok" : "bad");
       panel.scrollIntoView({ block: "center" });
     });
@@ -293,10 +425,15 @@
     setStatus(clipStatus, "preview mode: the clipboard needs the backend");
     setStatus(openStatus, "preview mode: opening things needs the backend");
     setStatus(notifyStatus, "preview mode: notifications need the backend");
+    setStatus(menuStatus, "preview mode: a native menu needs the backend");
+    setStatus(trayStatus, "preview mode: a tray icon needs the backend");
+    setStatus(postStatus, "preview mode: the main-thread post needs the backend");
+    setStatus(dialogStatus, "preview mode: native dialogs need the backend");
     setStatus(hostStatus, "preview mode: host info needs the backend");
     setStatus(forbiddenStatus, "preview mode: capability checks need the backend");
     [copyBtn, pasteBtn, openUrlBtn, openPathBtn, openBlockedBtn, notifyBtn,
-     notifySupportBtn, hostBtn, forbiddenBtn].forEach(function (b) { b.disabled = true; });
+     notifySupportBtn, menuPopupBtn, menuCloseBtn, traySetBtn, traySetMenuBtn, trayDestroyBtn,
+     hostBtn, forbiddenBtn].forEach(function (b) { b.disabled = true; });
     return;
   }
 
@@ -371,7 +508,9 @@
         return window.vails.notification.notify({
           title: "Vails Services Demo",
           body: "Notification from the page."
-        }).then(function () { setStatus(notifyStatus, "shown (Windows tray balloon)", "ok"); });
+        }).then(function (mechanism) {
+          setStatus(notifyStatus, "shown via: " + mechanism, "ok");
+        });
       })
       .catch(function (e) { setStatus(notifyStatus, "notify failed: " + e, "bad"); })
       .then(function () { notifyBtn.disabled = false; });
@@ -383,6 +522,142 @@
       .then(function (r) { setStatus(notifyStatus, "is_supported: " + r, "ok"); })
       .catch(function (e) { setStatus(notifyStatus, "is_supported failed: " + e, "bad"); })
       .then(function () { notifySupportBtn.disabled = false; });
+  });
+
+  menuPopupBtn.addEventListener("click", function () {
+    setStatus(menuStatus, "opening...");
+    // popup resolves with '' on every platform; the choice arrives as an
+    // event, which the listeners above turn into this same line.
+    window.vails.menu.popup({ items: menuItems })
+      .then(function () { return null; })
+      .catch(function (e) { setStatus(menuStatus, "menu.popup failed: " + e, "bad"); });
+  });
+
+  menuCloseBtn.addEventListener("click", function () {
+    // A frontend that closes defensively gets no error back, which is why
+    // this button works even when nothing is open.
+    window.vails.menu.close()
+      .then(function () { return null; })
+      .catch(function (e) { setStatus(menuStatus, "menu.close failed: " + e, "bad"); });
+  });
+
+  menuSetMenuBtn.addEventListener("click", function () {
+    // Installs the window's menu bar. The command resolves immediately (a bar
+    // is not modal, so there is nothing to wait for) and the choice arrives on
+    // the same menu:clicked event the popup uses — the listener above already
+    // renders it, which is the point of the shared contract.
+    setStatus(menuStatus, "menu bar installed — pick an item from the window", "");
+    window.vails.menu.set_menu({
+      items: [
+        { id: "file", label: "File", children: [
+          { id: "file/new", label: "New" },
+          { id: "file/open", label: "Open..." },
+          { separator: true },
+          { id: "file/quit", label: "Quit" }
+        ] },
+        { id: "edit", label: "Edit", children: [
+          { id: "edit/copy", label: "Copy" },
+          { id: "edit/paste", label: "Paste" }
+        ] },
+        { id: "help", label: "Help" }
+      ]
+    })
+      .then(function () { return null; })
+      .catch(function (e) { setStatus(menuStatus, "menu.set_menu failed: " + e, "bad"); });
+  });
+
+  traySetBtn.addEventListener("click", function () {
+    setStatus(trayStatus, "installing...");
+    window.vails.tray.set({ tooltip: "Vails Services Demo" })
+      .then(function () {
+        setStatus(trayStatus, "icon installed - click it (or run the tray probe " +
+          "to have the click simulated)", "ok");      })
+      .catch(function (e) { setStatus(trayStatus, "tray.set failed: " + e, "bad"); });
+  });
+
+  traySetMenuBtn.addEventListener("click", function () {
+    // Installs the icon first if it is not there, then attaches a menu. A
+    // menu on an icon that does not exist is not an error on Windows (the
+    // menu is remembered for the next tray.set) but on Linux there is no icon
+    // to attach it to, so ordering it here keeps the button honest on both.
+    window.vails.tray.set({ tooltip: "Vails Services Demo" })
+      .then(function () {
+        return window.vails.tray.set_menu({
+          items: [
+            { id: "tray/open", label: "Open" },
+            { id: "tray/settings", label: "Settings" },
+            { separator: true },
+            { id: "tray/quit", label: "Quit" }
+          ]
+        });
+      })
+      .then(function () {
+        setStatus(trayStatus, "menu attached - a right click on the icon opens " +
+          "it, and the choice arrives as menu:clicked", "ok");
+      })
+      .catch(function (e) {
+        setStatus(trayStatus, "tray.set_menu failed: " + e, "bad");
+      });
+  });
+
+  trayDestroyBtn.addEventListener("click", function () {
+    window.vails.tray.destroy()
+      .then(function () { setStatus(trayStatus, "icon removed", "ok"); })
+      .catch(function (e) { setStatus(trayStatus, "tray.destroy failed: " + e, "bad"); });
+  });
+
+  // The dialog handlers all share one shape, and the shape is the point: a
+  // canceled dialog resolves like any other call, so the "canceled" report is
+  // a success path with different text rather than the catch branch. Writing
+  // it any other way would teach the wrong thing about the service.
+  function reportDialogResult(raw, what) {
+    var res;
+    try { res = JSON.parse(raw); } catch (e) { setStatus(dialogStatus, String(raw), "bad"); return; }
+    if (res.canceled) {
+      setStatus(dialogStatus, what + ": canceled (a normal result, not an error)", "");
+      return;
+    }
+    if (res.paths && res.paths.length) {
+      setStatus(dialogStatus, what + ": " + res.paths.join(" | "), "ok");
+      return;
+    }
+    // A message box reports the button instead of a path. `ok` and `yes` are
+    // the accepting answers; everything else, including `none`, is a refusal.
+    var accepted = res.button === "ok" || res.button === "yes";
+    setStatus(dialogStatus, what + ": button " + res.button +
+      (accepted ? " (accepted)" : " (declined)"), accepted ? "ok" : "");
+  }
+
+  dialogOpenBtn.addEventListener("click", function () {
+    setStatus(dialogStatus, "waiting for the file picker...");
+    window.vails.dialog.open({
+      title: "Pick a file",
+      filters: [
+        { name: "Text files", extensions: "txt,md" },
+        { name: "Everything", extensions: "*" }
+      ]
+    }).then(function (raw) { reportDialogResult(raw, "open"); })
+      .catch(function (e) { setStatus(dialogStatus, "dialog.open failed: " + e, "bad"); });
+  });
+
+  dialogSaveBtn.addEventListener("click", function () {
+    setStatus(dialogStatus, "waiting for the save dialog...");
+    window.vails.dialog.save({
+      title: "Save as",
+      default_name: "untitled.txt",
+      filters: [{ name: "Text files", extensions: "txt,md" }]
+    }).then(function (raw) { reportDialogResult(raw, "save"); })
+      .catch(function (e) { setStatus(dialogStatus, "dialog.save failed: " + e, "bad"); });
+  });
+
+  dialogMessageBtn.addEventListener("click", function () {
+    setStatus(dialogStatus, "waiting for the message box...");
+    window.vails.dialog.message({
+      title: "Vails",
+      message: "This is a real native message box, answered by you.",
+      buttons: "okcancel"
+    }).then(function (raw) { reportDialogResult(raw, "message"); })
+      .catch(function (e) { setStatus(dialogStatus, "dialog.message failed: " + e, "bad"); });
   });
 
   hostBtn.addEventListener("click", function () {

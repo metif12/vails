@@ -138,3 +138,33 @@ fn test_examples_ship_default_csp() {
 		assert html.contains(default_csp()), name
 	}
 }
+
+// No example page may spell a closing body or script tag inside a <script>
+// element. The examples that carry an E2E probe inject one with
+// `inject_before_body`, and a mention of such a tag in a comment or a string
+// inside the page's own script element makes the injection land *inside* that
+// element: the script closes early and the rest of the source renders as
+// visible text. It happened, it looked like a broken page, and the fix in the
+// example (search for the last tag, not the first) is a mitigation - this is
+// the invariant itself.
+fn test_example_pages_have_no_stray_closing_tags_inside_scripts() {
+	root := os.dir(os.dir(@FILE))
+	examples := os.join_path(root, 'examples')
+	for name in os.ls(examples)! {
+		page := os.join_path(examples, name, 'frontend', 'index.html')
+		if !os.exists(page) {
+			continue
+		}
+		html := os.read_file(page) or { panic('cannot read ' + page + ': ' + err.msg()) }
+		// The one opening tag and the one closing tag are the boundary; what
+		// must not appear between them is another closing tag.
+		open_at := html.index('<script>') or { continue }
+		rest := html[open_at + '<script>'.len..]
+		close_at := rest.index('</script>') or { continue }
+		body := rest[..close_at]
+		for tag in ['</body>', '</script>'] {
+			assert !body.contains(tag), name + ': "' + tag +
+				'" inside a <script> element breaks the E2E probe injection'
+		}
+	}
+}

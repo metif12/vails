@@ -10,8 +10,9 @@
 // The frontend then calls window.vails.dialog.open(...) or uses the
 // snippet `vails dts` generates.
 //
-// Windows runs the real pickers; Linux reports 'not implemented' from the
-// dialog backend until Phase 5b (tests/e2e_linux/README.md).
+// Windows runs the real pickers; Linux runs the GTK ones as of ADR-0027, and
+// refuses with 'no display available' when the app is headless. See
+// tests/e2e_linux/README.md.
 module main
 
 import bridge

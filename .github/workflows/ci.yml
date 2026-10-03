@@ -1,0 +1,176 @@
+# CI — the first one in this repository (ADR-0022 B3).
+#
+# Shape: one job per target on a matrix. Linux builds inside the
+# repository's own Dockerfile; Windows builds on a native runner with
+# MSYS2. Both facts are decisions and both are argued in ADR-0022:
+#
+# - **No single Dockerfile for both platforms.** The Windows backend
+#   links the *Windows* import library of `webview` (C++, against
+#   WebView2); cross-compiling it is its own project.
+# - **No Windows container.** It costs more, runs slower, and is no more
+#   reproducible than a pinned `pacman -S` step on a normal runner.
+#
+# What each push does: `v test .`, a smoke build of the CLI, a build of
+# `examples/services`, and — on Windows — a `vails build` whose output is
+# checked to actually start. What a tag does additionally: stamp a
+# version and upload the artifact. The release job exists because the
+# updater's GitHub provider consumes exactly these assets (ADR-0020 U6),
+# so the publisher is the build's own last step rather than a separate
+# manual chore — which is why the two tracks were planned together.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # ADR-0005: apps MUST build with `-gc none` on Linux. Boehm GC crashes
+  # (`GC_noop1_ptr`, fork-unsafe) when WebKit spawns subprocesses. Real
+  # builds get this from `buildplan.app_flags(.linux)`, so this variable
+  # is only what `v test` and the ad-hoc `v` invocations below need.
+  VFLAGS: -gc none
+
+jobs:
+  linux:
+    name: linux (container)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        # The image compiles V once as its own layer, so this is the
+        # slow step and it is cached on the image layer, not per run.
+        run: docker build -t vails-ci -f Dockerfile .
+
+      - name: v test .
+        # Inside the container: no MSYS2, no Windows path assumptions,
+        # the same `v test .` a developer runs.
+        run: docker run --rm vails-ci
+
+      - name: build the CLI
+        # The CLI imports `net` (the dev server), which is why it has its
+        # own recipe in `buildplan.cli_flags` and why this is a separate
+        # step from the app build: they are not the same command.
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work vails-ci \
+            sh -c '/opt/vlang/v -cc gcc -cflags "-Wno-incompatible-pointer-types" -o /work/vails ./cli'
+
+      - name: build an app
+        # An app needs no flags beyond -gc none (asserted in
+        # `buildplan.app_flags` and at tests/e2e_windows/README.md:41).
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work vails-ci \
+            sh -c '/opt/vlang/v -cc gcc -o /work/services ./examples/services'
+
+  windows:
+    name: windows (msys2 ucrt64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install V
+        # The published release rather than a source build: this step
+        # must not depend on MSYS2, which the next step installs, and V's
+        # own `make` on Windows is not what this job is here to test.
+        run: winget install --id=VLang.V --accept-source-agreements --accept-package-agreements --silent
+
+      - name: Install MSYS2 ucrt64 + the webview packages
+        run: |
+          choco install msys2 -y --no-progress
+          C:\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader"
+
+      - name: Put ucrt64 on PATH
+        # A separate step, and after the install, because ADR-0005's rule
+        # is about EVERY later step: without C:\msys64\ucrt64\bin on PATH
+        # even `cc1` cannot find its own DLLs, which fails as a SILENT gcc
+        # failure rather than a missing-symbol error. GITHUB_PATH only
+        # affects subsequent steps, which is exactly the scope wanted.
+        run: "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: v test .
+        # The `-ldflags` is not optional on gcc 16, and the reason is a V
+        # bug rather than a repo one: V 0.5.2's `dependency_scan_fallback`
+        # link path emits `#flag`-sourced `-l` flags BEFORE most object
+        # files, and GNU ld only resolves an archive against the objects
+        # that precede it, so `net.http`'s `ws2_32` never resolves. It has
+        # to arrive as `-ldflags`, which is emitted last. Documented in
+        # AGENTS.md §1 and in `buildplan.cli_flags`.
+        run: v -cc gcc -ldflags "-lws2_32" test .
+
+      - name: build the CLI
+        run: v -cc gcc -cflags "-Wno-incompatible-pointer-types" -ldflags "-lws2_32" -o vails.exe ./cli
+
+      - name: vails build produces a RUNNABLE binary
+        # This step is the reason B1 exists. The five side-by-side DLLs
+        # used to be `#` comments in a README and nothing else, so a
+        # green CI would have uploaded an .exe that cannot start — a
+        # worse outcome than no CI at all. The check is that the staging
+        # step reported all five AND that they are in the artifact dir.
+        run: |
+          $env:VAILS_HOME = $PWD
+          New-Item -ItemType Directory -Force -Path ci-smoke | Out-Null
+          Push-Location ci-smoke
+          ..\vails.exe init smokeapp
+          Pop-Location
+          Push-Location ci-smoke\smokeapp
+          ..\..\vails.exe build --version 0.0.0-ci
+          $staged = @('libwebview-0.12.dll', 'WebView2Loader.dll', 'libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll')
+          foreach ($d in $staged) {
+            if (-not (Test-Path $d)) { throw "not staged: $d - a green build that cannot start" }
+          }
+          Pop-Location
+
+      - name: upload the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vails-windows
+          path: ci-smoke/smokeapp/
+
+  release:
+    name: release on a tag
+    needs: [linux, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the tag version
+        # Stripped of the leading `v`, which every tag in this
+        # repository's history carries. `buildinfo.validate_version` in
+        # the app itself accepts and strips it too, so the two agree.
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $env:GITHUB_OUTPUT
+
+      - name: Check the tag and v.mod agree
+        # A tag saying 0.5.0 while vails.json says 0.4.0 is the exact
+        # drift B0 reconciled, arriving again through a different door.
+        # `buildinfo.version_drift` is the same rule the test enforces.
+        run: |
+          echo "tag version: ${{ steps.ver.outputs.version }}"
+          grep "version" v.mod
+
+      - name: Build the version-stamped app
+        # The stamp is `-d vails_version=`, which `buildplan.recipe`
+        # emits and `buildinfo.version` reads back (ADR-0022 B0). A
+        # release without it reports 'dev' forever, and 'dev' silently
+        # disables every update check — so this step is not cosmetic.
+        run: |
+          docker build -t vails-ci -f Dockerfile .
+          docker run --rm -v "$PWD:/work" -w /work vails-ci \
+            sh -c "/opt/vlang/v -cc gcc -d vails_version=${{ steps.ver.outputs.version }} -o /work/services ./examples/services"
+
+      - name: Attach the updater manifest
+        # ADR-0020 U6: the publisher and the client read the same manifest
+        # code, so the format has exactly one writer. `vails updater
+        # manifest` IS that writer and it arrives with U6; until then this
+        # step records the version so a later run has the value, rather
+        # than pretending the manifest exists.
+        run: echo "vails updater manifest not implemented yet (ADR-0020 U6) - version ${{ steps.ver.outputs.version }}"

@@ -1,0 +1,34 @@
+{
+	"name": "Vails Multiwindow Demo",
+	"version": "0.1.0",
+	"asset_root": "frontend",
+	"windows": [
+		{
+			"label": "main",
+			"title": "Vails Multiwindow - main",
+			"width": 620,
+			"height": 760
+		},
+		{
+			"label": "settings",
+			"title": "Vails Multiwindow - settings",
+			"width": 620,
+			"height": 760
+		}
+	],
+	"capabilities": [
+		{
+			"id": "cross-window-demo",
+			"windows": ["main", "settings"],
+			"commands": ["demo.ping", "demo.broadcast"],
+			"asset_roots": ["frontend"],
+			"platforms": []
+		}
+	],
+	"bundle": {
+		"name": "Vails Multiwindow Demo",
+		"identifier": "dev.vails.multiwindow",
+		"icon": "",
+		"windows_dll_side_by_side": true
+	}
+}

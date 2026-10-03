@@ -21,16 +21,19 @@ pub:
 mut:
 	services []string
 	running  bool
-	// store is the managed state (T4, Tauri `.manage()` equivalent): one
-	// store per App, read/written from inside command handlers. Handlers
+	// state is the managed app state (T4, Tauri `.manage()` equivalent): one
+	// AppState per App, read/written from inside command handlers. Handlers
 	// capture `&app` and call set_state/get_state; values stay raw JSON.
-	store state.Store
+	// Named `state` and not `store` so nothing here collides with the
+	// persisted `store` service (ADR-0026) - it shares this module's import
+	// name, and a field is always reached as `a.state`, never bare.
+	state state.AppState
 }
 
 pub fn new(opts AppOptions) App {
 	return App{
 		options: opts
-		store:   state.new_store()
+		state:   state.new_appstate()
 	}
 }
 
@@ -51,17 +54,17 @@ pub fn (a App) is_running() bool {
 	return a.running
 }
 
-// set_state records val_json under key in the App's managed store (T4).
+// set_state records val_json under key in the App's managed app state (T4).
 pub fn (mut a App) set_state(key string, val_json string) ! {
-	a.store.set(key, val_json)!
+	a.state.set(key, val_json)!
 }
 
 // get_state returns the value stored under key, or an error when absent.
 pub fn (a App) get_state(key string) !string {
-	return a.store.get(key)!
+	return a.state.get(key)!
 }
 
-// has_state reports whether key is present in the App's managed store.
+// has_state reports whether key is present in the App's managed app state.
 pub fn (a App) has_state(key string) bool {
-	return a.store.has(key)
+	return a.state.has(key)
 }

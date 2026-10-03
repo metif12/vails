@@ -4,112 +4,384 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="The Vails hello example: a V backend counter reached through the bridge." />
 <!-- Default Vails CSP (mirrors webview.default_csp() — kept in sync by webview/secure_test.v).
      Preview fallback (opened outside a Vails window) runs under the same policy: the secure mode. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
 <title>Hello Vails</title>
 <style>
+  /* ---------------------------------------------------------------------
+     Tokens.
+
+     Everything the card draws comes from here, so a mode is a value swap
+     and never a second stylesheet. The page is dark by default because
+     that is the direction this UI is designed in; prefers-color-scheme
+     light is a full alternative below, not an inversion of the same
+     handful of rules.
+
+     Fonts are the system stack on purpose. This example ships under a
+     CSP that allows no external origin, and it has no build step, so a
+     webfont is not an option - the honest implementation is the platform's
+     own UI face plus its own monospace, which is what `--ui` and `--mono`
+     are. The display sizes lean on tight tracking and weight instead of
+     on a typeface nobody has installed.
+     --------------------------------------------------------------------- */
+  :root {
+    color-scheme: dark light;
+
+    --bg: #0e1116;
+    --surface: #161a20;
+    --surface-2: #1d222a;
+    --surface-3: #252b34;
+    --line: #272d37;
+    --line-strong: #39414e;
+
+    --text: #e9ecf1;
+    --muted: #98a1ae;
+    /* 5.6:1 on --surface. The first value tried was #6b7481 at 3.7:1, which
+       is fine for a decorative rule and not fine for the 10.5px label the
+       quiet token also carries. */
+    --faint: #8a93a0;
+
+    /* One accent, used everywhere it is allowed. It carries the readout,
+       the primary action, and the focus ring - never two accents. */
+    --accent: #f0a23c;
+    --accent-quiet: #7a5220;
+    --accent-ink: #17120a;
+
+    /* Tinted to the surface, never pure black: a neutral-black shadow on
+       a dark card reads as a hole, a warm-tinted one reads as depth. */
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+              0 24px 48px -24px rgba(0, 0, 0, 0.85),
+              0 2px 8px -4px rgba(0, 0, 0, 0.6);
+
+    /* One radius scale. The card is the outer container; every control
+       nests inside it, so there are two values and no third. */
+    --r-card: 18px;
+    --r-ctl: 10px;
+
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    /* A single easing, so every transition on the page shares a feel. */
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f5f7;
+      --surface: #ffffff;
+      --surface-2: #f7f8fa;
+      --surface-3: #eef0f4;
+      --line: #e2e5ea;
+      --line-strong: #c9ced7;
+
+      --text: #14171c;
+      --muted: #5b6472;
+      /* 5.2:1 on the white surface - see the dark-mode note on the same
+         token. This is the smallest text on the page, so it is the one that
+         has to clear AA with room to spare. */
+      --faint: #656d7a;
+
+      /* Darker than the dark-mode accent: amber on white needs the
+         contrast that amber on near-black gets for free. Pushed towards
+         orange rather than yellow, because the same hue that reads as warm
+         amber on near-black turns to mud when it has to sit on white. */
+      --accent: #c2410c;
+      --accent-quiet: #f0d9b4;
+      --accent-ink: #ffffff;
+
+      --shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset,
+                0 18px 40px -22px rgba(20, 23, 28, 0.28),
+                0 2px 6px -3px rgba(20, 23, 28, 0.12);
+    }
+  }
+
   * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
   body {
     margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #1e293b;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    font-family: var(--ui);
+    color: var(--text);
+    background-color: var(--bg);
+    /* The one gradient on the page: a backdrop wash that gives the dark
+       field some depth. It is behind everything and touches no element,
+       so it never reads as a glow on the card. */
+    background-image: radial-gradient(120% 90% at 50% -20%,
+      color-mix(in srgb, var(--accent) 9%, transparent) 0%,
+      transparent 62%);
+    -webkit-font-smoothing: antialiased;
   }
+
   .card {
-    background: #ffffff;
-    border-radius: 20px;
-    padding: 40px 36px 32px;
-    width: min(420px, 92vw);
-    text-align: center;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+    width: min(400px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    box-shadow: var(--shadow);
+    padding: 26px 26px 22px;
+    /* Left-aligned, not centred. A centred card is the shape a template
+       reaches for by default; the readout and the labels below it read as
+       an instrument panel once the text shares one left edge. */
+    text-align: left;
   }
-  .badge {
-    width: 56px;
-    height: 56px;
-    margin: 0 auto 12px;
-    border-radius: 16px;
+
+  /* --- app chrome ------------------------------------------------------ */
+
+  .brand {
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-size: 28px;
-    font-weight: 800;
-    color: #fff;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    gap: 10px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
   }
-  h1 { margin: 0 0 4px; font-size: 26px; }
-  .subtitle { margin: 0 0 20px; color: #64748b; font-size: 14px; }
+  .mark {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font: 700 14px/1 var(--ui);
+    letter-spacing: 0;
+  }
+  .wordmark {
+    font: 600 12px/1 var(--ui);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  /* --- headline -------------------------------------------------------- */
+
+  h1 {
+    margin: 22px 0 6px;
+    font-size: 27px;
+    /* Tight on the large sizes so the two lines set as one block rather
+       than as two words that happen to be adjacent. */
+    letter-spacing: -0.022em;
+    line-height: 1.12;
+    font-weight: 650;
+  }
+  .subtitle {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  /* --- readout --------------------------------------------------------- */
+
+  .readout {
+    margin: 24px 0 0;
+    padding: 18px 0 20px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  /* The label and Reset share an edge: they are both small controls for the
+     same readout, and stacking Reset below the +/- row made it an orphaned
+     full-width band with nothing to belong to. */
+  .readout-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .readout-label {
+    font: 600 10.5px/1 var(--mono);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
   .counter-value {
-    font-size: 72px;
-    font-weight: 800;
-    line-height: 1;
-    margin: 8px 0 16px;
+    /* The UI face, not the mono one. Consolas draws a slashed zero, and at
+       display size that glyph reads as two characters - which is a
+       spectacular thing to do to a counter. tabular-nums is kept anyway:
+       a counter whose digits change width jitters on every click, and the
+       jitter is read as a bug. */
+    font: 700 58px/1 var(--ui);
     font-variant-numeric: tabular-nums;
-    transition: transform 0.12s ease;
+    letter-spacing: -0.035em;
+    margin-top: 8px;
+    color: var(--accent);
+    transition: transform 140ms var(--ease);
   }
-  .counter-value.pop { transform: scale(1.12); }
-  .btn-row { display: flex; gap: 12px; justify-content: center; }
-  button { cursor: pointer; font: inherit; border: none; border-radius: 12px; }
-  button:disabled { opacity: 0.5; cursor: default; }
+  .counter-value.pop { transform: scale(1.08); }
+
+  /* --- controls -------------------------------------------------------- */
+
+  .btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: var(--r-ctl);
+    border: 1px solid transparent;
+    /* A press has to look like a press. Without this the only feedback a
+       click gives is the number changing, which is easy to miss. */
+    transition: background-color 120ms var(--ease),
+                border-color 120ms var(--ease),
+                transform 90ms var(--ease);
+  }
+  button:disabled { cursor: default; opacity: 0.45; }
+
   .btn-count {
-    flex: 1;
-    padding: 12px 0;
-    font-size: 24px;
-    font-weight: 700;
-  }
-  .btn-dec { background: #f1f5f9; color: #0f172a; }
-  .btn-dec:hover { background: #e2e8f0; }
-  .btn-inc { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
-  .btn-inc:hover { filter: brightness(1.08); }
-  .btn-reset {
-    margin-top: 12px;
-    background: none;
-    color: #64748b;
-    font-size: 13px;
-    text-decoration: underline;
-  }
-  .btn-reset:hover { color: #0f172a; }
-  .divider { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0 20px; }
-  .btn-ping {
-    padding: 10px 22px;
-    font-size: 14px;
+    padding: 11px 0;
+    font-size: 20px;
     font-weight: 600;
-    background: #0f172a;
-    color: #fff;
+    line-height: 1;
+    background: var(--surface-2);
+    color: var(--text);
+    border-color: var(--line);
   }
-  .btn-ping:hover { background: #1e293b; }
+  /* U+2212 next to a plus sign is a short stroke against two, so at any
+     matched size the minus reads as the weaker control. Drawing the dash
+     makes its length and thickness the plus sign's own, which is the only
+     way the pair looks like a matched set. */
+  .dash {
+    display: block;
+    width: 13px;
+    height: 2.6px;
+    margin: 0 auto;
+    background: currentColor;
+    border-radius: 1.3px;
+  }
+  .btn-count:hover:not(:disabled) { background: var(--surface-3); border-color: var(--line-strong); }
+  .btn-count:active:not(:disabled) { transform: translateY(1px); }
+
+  /* The one filled control, and the only place the accent becomes a
+     background. One primary action on the card, not two. */
+  .btn-inc {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+  .btn-inc:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-inc:active:not(:disabled) { transform: translateY(1px); }
+
+  .btn-reset {
+    background: none;
+    color: var(--muted);
+    font-size: 12.5px;
+    padding: 2px 0;
+  }
+  .btn-reset:hover { color: var(--text); }
+  .btn-reset:active { transform: translateY(1px); }
+
+  .btn-ping {
+    display: block;
+    width: 100%;
+    margin-top: 18px;
+    padding: 11px 0;
+    background: var(--surface-2);
+    color: var(--text);
+    border-color: var(--line-strong);
+    font-size: 13.5px;
+    font-weight: 550;
+  }
+  .btn-ping:hover:not(:disabled) { background: var(--surface-3); }
+  .btn-ping:active:not(:disabled) { transform: translateY(1px); }
+
+  /* A visible focus ring on every control. Keyboard users get to see
+     where they are; :focus-visible keeps it off mouse clicks. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* --- status ---------------------------------------------------------- */
+
   .status {
-    margin: 14px 0 0;
-    font-size: 13px;
-    font-family: ui-monospace, Consolas, monospace;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 8px 12px;
-    color: #475569;
-    min-height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 10px 0 0;
+    padding: 10px 12px;
+    font: 500 12px/1.45 var(--mono);
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-ctl);
+    min-height: 38px;
+    /* The message is replaced often and can be two lines; reserving a
+       little slack keeps the card from resizing under the reader. */
+    overflow-wrap: anywhere;
   }
-  .hint { margin: 14px 0 0; font-size: 12px; color: #94a3b8; }
+  /* The dot is the state channel, so the sentence beside it does not have
+     to spell out the state in prose. Colour is the only thing it encodes,
+     and the words next to it always carry the same meaning - which is why
+     it is safe to leave it as colour. */
+  .status::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--faint);
+    transition: background-color 160ms var(--ease);
+  }
+  .status[data-state="ok"]::before { background: var(--accent); }
+  .status[data-state="bad"]::before { background: #e5484d; }
+
+  .hint {
+    margin: 12px 0 0;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--faint);
+  }
+  .hint:empty { display: none; }
+
+  /* --- reduced motion -------------------------------------------------- */
+
+  /* Everything above the fold animates on purpose, and all of it is
+     decoration or feedback - never information. So when motion is not
+     wanted, it can all go without costing the page anything. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+    .counter-value.pop { transform: none; }
+    button:active:not(:disabled) { transform: none; }
+  }
 </style>
 </head>
 <body>
 <main class="card">
-  <div class="badge">V</div>
-  <h1>Hello from Vails</h1>
-  <p class="subtitle">V backend counter + bridge demo</p>
-  <div class="counter-value" id="count">0</div>
-  <div class="btn-row">
-    <button class="btn-count btn-dec" id="dec" type="button">-</button>
-    <button class="btn-count btn-inc" id="inc" type="button">+</button>
+  <div class="brand">
+    <div class="mark" aria-hidden="true">V</div>
+    <span class="wordmark">Vails</span>
   </div>
-  <button class="btn-reset" id="reset" type="button">Reset</button>
-  <hr class="divider" />
-  <button class="btn-ping" id="ping" type="button">ping backend</button>
-  <p class="status" id="status">backend: not connected</p>
+
+  <h1>Hello from Vails</h1>
+  <p class="subtitle">A V backend counter, reached through the bridge.</p>
+
+  <div class="readout">
+    <div class="readout-head">
+      <div class="readout-label">Counter</div>
+      <button class="btn-reset" id="reset" type="button">Reset</button>
+    </div>
+    <div class="counter-value" id="count">0</div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn-count" id="dec" type="button" aria-label="Decrement"><span class="dash"></span></button>
+    <button class="btn-count btn-inc" id="inc" type="button" aria-label="Increment">+</button>
+  </div>
+  <button class="btn-ping" id="ping" type="button">Ping backend</button>
+  <p class="status" id="status" role="status">backend: not connected</p>
   <p class="hint" id="hint"></p>
 </main>
 <script>
@@ -124,6 +396,25 @@
   var useBackend = !!window.vails;
   var localCount = 0;
 
+  // say writes the status line and sets the dot's state.
+  //
+  // The state is derived from the message rather than passed in, because
+  // every call site already knows what it is saying and none of them
+  // should have to say it twice. Prefixes are the contract: anything
+  // starting "error:" is a failure, and the two preview-mode messages are
+  // the neutral middle. An unrecognised message stays neutral rather than
+  // being guessed into one of the states.
+  function say(text) {
+    statusEl.textContent = text;
+    if (text.indexOf("error:") === 0) {
+      statusEl.dataset.state = "bad";
+    } else if (text.indexOf("preview mode") === 0) {
+      statusEl.dataset.state = "idle";
+    } else {
+      statusEl.dataset.state = "ok";
+    }
+  }
+
   function render(n) {
     countEl.textContent = n;
     countEl.classList.remove("pop");
@@ -131,12 +422,12 @@
     countEl.classList.add("pop");
   }
   function showError(e) {
-    statusEl.textContent = "error: " + (e && e.message ? e.message : e);
+    say("error: " + (e && e.message ? e.message : e));
   }
   function applyResult(r) {
     var n = parseInt(r, 10);
     if (isNaN(n)) {
-      statusEl.textContent = "backend says: " + r;
+      say("backend says: " + r);
       return;
     }
     render(n);
@@ -163,24 +454,27 @@
   });
   pingBtn.addEventListener("click", function () {
     if (!useBackend) {
-      statusEl.textContent = "preview mode: run inside Vails window";
+      say("preview mode: run inside Vails window");
       return;
     }
     window.vails.call("ping", "").then(function (r) {
-      statusEl.textContent = "backend says: " + r;
+      say("backend says: " + r);
     }).catch(showError);
   });
 
   if (useBackend) {
     window.vails.onEvent("ready", function (d) {
-      statusEl.textContent = "event: " + d;
+      say("event: " + d);
     });
     callOrLocal("counter_get").then(applyResult).catch(showError);
   } else {
     render(0);
     pingBtn.disabled = true;
-    hintEl.textContent = "preview mode: counter runs locally, run inside Vails window for backend state";
-    statusEl.textContent = "preview mode: run inside Vails window";
+    // The status line already says the app is not connected, so the hint
+    // spends its space on the thing the reader can do about it instead of
+    // restating the state in a second voice.
+    hintEl.textContent = 'Run "v run ./examples/hello" to drive this counter from V.';
+    say("preview mode: run inside Vails window");
   }
 })();
 </script>

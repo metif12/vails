@@ -9,13 +9,18 @@
 module main
 
 import bridge
+import buildinfo
+import buildplan
 import config
+import deps
 import dev
 import os
 import services
 import webview
 
-const version = '0.3.0'
+// version is the framework version, owned by buildinfo so there is one
+// number in the repository rather than two editable-by-hand ones (B0).
+const version = buildinfo.framework_version
 
 fn main() {
 	args := os.args[1..]
@@ -28,7 +33,7 @@ fn main() {
 			println('vails ' + version)
 		}
 		'doctor' {
-			doctor()
+			doctor(args[1..])
 		}
 		'init' {
 			name := if args.len > 1 && !args[1].starts_with('--') { args[1] } else { 'hello' }
@@ -55,6 +60,12 @@ fn main() {
 				exit(1)
 			}
 		}
+		'deps' {
+			report_deps(args[1..]) or {
+				eprintln('deps failed: ' + err.msg())
+				exit(1)
+			}
+		}
 		else {
 			eprintln('unknown command: ' + args[0])
 			print_usage()
@@ -69,11 +80,96 @@ fn print_usage() {
 	println('  run [--config path] [--port N] [--serve-only]')
 	println('                       dev server + open first window at its URL')
 	println('                       (--serve-only: just serve, no window)')
-	println('  build [--config path] [--output path]')
-	println('                       compile the project dir to a binary')
+	println('  build [--config path] [--output path] [' + buildinfo.help + ']')
+	println('                       compile the project dir to a runnable binary')
+	println('  doctor [--config path]')
+	println('                       validate the toolchain and the project')
 	println('  dts [--config path] [--out path] [--js] [--check]')
 	println('                       generate .d.ts (+ --js service snippets)')
 	println('                       for the granted services')
+	println('  deps [--config path]')
+	println('                       list the declared dependencies and compare')
+	println('                       them against ' + deps.lock_path)
+}
+
+// report_deps implements `vails deps` (B5).
+//
+// It reports, and it does not install. That split is deliberate and it
+// is the whole of what this command is in v1: the declarations are
+// parsed, validated and diffed against `vails.lock`, so a project can be
+// checked in CI without a network, and the fetching is left to
+// `v install` / VPM — which is the tool that already knows how to resolve
+// a constraint and how to put a module on VMODULES.
+//
+// Writing that a framework's own `deps install` would "just call VPM"
+// sounds harmless and is where the two-writers problem comes from: the
+// moment Vails maintains its own copy of the resolved tree, a hand-run
+// `v install` and a Vails-run one can disagree, and the build depends on
+// which one ran last. One writer for the tree, VPM; one writer for the
+// declarations, this module.
+fn report_deps(args []string) ! {
+	path := flag_value(args, '--config', 'vails.json')
+	text := os.read_file(path) or {
+		return error('cannot read ' + path + ': ' + err.msg())
+	}
+	set := deps.parse(text)!
+	println('dependencies (' + path + '): ' + set.summary())
+	if set.is_empty() {
+		println('  nothing to resolve. Add a "dependencies" block to ' + path +
+			', e.g. [{"name": "vlang.leveldb", "version": ">=1.0.0"}]')
+		return
+	}
+	lock_file := os.join_path(os.dir(path), deps.lock_path)
+	locked := os.read_file(lock_file) or {
+		println('  ' + deps.lock_path + ' : not written yet (run `v install` to resolve)')
+		return
+	}
+	locked_set := deps.decode_lock(locked)!
+	mut missing := []string{}
+	mut extra := []string{}
+	for d in set.items {
+		have := locked_set.get(d.name) or {
+			missing << d.name
+			continue
+		}
+		// Only an EXACT requirement is compared. A constraint like
+		// `>=1.0.0` was satisfied once, at resolve time, and the lock
+		// records the concrete version that satisfied it — so comparing
+		// the two here would report every ranged dependency as stale
+		// forever, which is what the first version of this function did.
+		//
+		// Re-evaluating the constraint at report time would also mean a
+		// second implementation of "does 1.4.2 satisfy >=1.0.0", and two
+		// implementations of a resolver is the thing this command
+		// deliberately avoids: VPM resolves, this reports.
+		if deps.is_exact_requirement(d.version) && have.version != d.version {
+			missing << d.name + ' (lock has ' + have.version + ', config pins ' +
+				d.version + ')'
+			continue
+		}
+		println('  ' + d.name + ' ' + have.version)
+	}
+	for d in locked_set.items {
+		if set.get(d.name) == none {
+			extra << d.name + ' ' + d.version
+		}
+	}
+	for s in missing {
+		eprintln('  ! ' + s + ' - not resolved by ' + deps.lock_path)
+	}
+	for s in extra {
+		eprintln('  ! ' + s + ' - in ' + deps.lock_path + ' but not in ' +
+			cfg_name(args))
+	}
+	if missing.len > 0 || extra.len > 0 {
+		return error(deps.lock_path + ' does not match ' + cfg_name(args) +
+			' (run `v install` to re-resolve)')
+	}
+}
+
+// cfg_name is the config path the command was pointed at, for messages.
+fn cfg_name(args []string) string {
+	return flag_value(args, '--config', 'vails.json')
 }
 
 // flag_value returns the value of `--flag value` or `--flag=value`,
@@ -150,12 +246,16 @@ fn run_dev(args []string) ! {
 }
 
 // build_app implements `vails build`: compile the project dir (which must
-// hold main.v, e.g. from `vails init`) to a binary. Scaffolded projects
-// import vails modules by bare name (`bridge`, `webview`, ---), so the
-// compiler needs the vails source root on its module path: build sets
-// VMODULES to it (explicit VAILS_HOME wins, else walk-up from the CLI
-// binary and the cwd). GUI backends need the native toolchain too --- see
-// `vails doctor`. Packaging stays Phase 7.
+// hold main.v, e.g. from `vails init`) to a binary that actually runs.
+// Scaffolded projects import vails modules by bare name (`bridge`,
+// `webview`, ---), so the compiler needs the vails source root on its
+// module path: build sets VMODULES to it (explicit VAILS_HOME wins, else
+// walk-up from the CLI binary and the cwd).
+//
+// Everything decided here comes from buildplan, so the flag set, the DLL
+// list and the output name are unit-tested on every platform without a
+// compiler (ADR-0022 B1). What is left here is the I/O: run the command,
+// copy the DLLs, and say what went wrong if either fails.
 fn build_app(args []string) ! {
 	cfg := load_project_config(args)!
 	root := project_dir_of(args)
@@ -167,21 +267,134 @@ fn build_app(args []string) ! {
 	if home == '' {
 		return error('cannot find the vails source root (no v.mod + webview/ found from the CLI or cwd) --- set VAILS_HOME to your vails checkout')
 	}
-	out := flag_value(args, '--output', cfg.bundle.name)
-	mut cc := ''
-	$if windows {
-		cc = ' -cc gcc'
+	// Validate the version BEFORE compiling: a binary that exists with the
+	// wrong string in it is worse than one that was never built.
+	version_arg := flag_value(args, '--version', '')
+	mut stamped := ''
+	if version_arg != '' {
+		stamped = buildinfo.validate_version(version_arg)!
 	}
-	cmd := 'v' + cc + ' -o "' + out + '" "' + root + '"'
+	mut r := buildplan.recipe(target_for_host(), cfg.bundle.name,
+		cfg.bundle.windows_dll_side_by_side, stamped)
+	// The `if x := f(); cond {` form is a V 0.5.2 parser bug
+	// ("unexpected eof, expecting `}`"), and the `if x := f() {` form
+	// additionally demands an Option from f. Both are recorded because
+	// the short forms are what everyone writes by reflex and the error
+	// message points at the end of the file rather than at this line.
+	out := flag_value(args, '--output', '')
+	if out != '' {
+		r.output = out
+	}
+	for w in r.warnings {
+		eprintln('  ! ' + w)
+	}
+	cmd := r.command(root)
 	println('+ VMODULES=' + home + ' ' + cmd)
 	old_modules := os.getenv('VMODULES')
 	os.setenv('VMODULES', join_modules_path(home, old_modules), true)
-	r := os.execute(cmd)
+	res := os.execute(cmd)
 	os.setenv('VMODULES', old_modules, true)
-	if r.exit_code != 0 {
-		return error('compile failed:\n' + r.output)
+	if res.exit_code != 0 {
+		return error('compile failed:\n' + res.output)
 	}
-	println('built: ' + out + ' (DLLs stay side-by-side on Windows; packaging arrives in Phase 7)')
+	println('built: ' + r.output + stamp_note(stamped))
+	if r.stage_dlls {
+		stage_dlls(r)!
+	} else if r.target == .windows {
+		println('  (side-by-side DLLs not staged: bundle.windows_dll_side_by_side is false)')
+	}
+}
+
+// stamp_note says what a build carries, because a release built without
+// a version looks exactly like a development build from the outside and
+// the difference decides whether every update check is disabled.
+fn stamp_note(stamped string) string {
+	if stamped == '' {
+		return ' (unstamped: pass --version <semver> to enable update checks)'
+	}
+	return ' (stamped ' + stamped + ')'
+}
+
+// stage_dlls copies the five side-by-side DLLs next to the built binary
+// (ADR-0005). This is the step whose absence made `vails build` produce
+// an .exe that could not start: the list existed only as `#` comments in
+// the READMEs, so a green CI would have shipped a dead artifact.
+//
+// It reports the individual missing files rather than a single failure,
+// because a missing `libwebview-0.12.dll` (the toolchain is not the one
+// the build assumed) and a missing `libstdc++-6.dll` (it is, but
+// something else is wrong) are the same symptom to a user and completely
+// different problems to fix.
+fn stage_dlls(r buildplan.Recipe) ! {
+	missing := buildplan.missing_dlls(r.dll_source)
+	if missing.len > 0 {
+		return error('cannot stage the side-by-side DLLs from ' + r.dll_source +
+			': missing ' + missing.join(', ') + '\n  the binary built, but it ' +
+			'will not START until those files are next to it')
+	}
+	mut copied := 0
+	mut skipped := 0
+	for name in r.dll_targets() {
+		src := os.join_path(r.dll_source, name)
+		// V 0.5.2 has no os.copy_file, so the copy is read + write.
+		// These are the loaders a shipped app already depends on, a few
+		// hundred KB each, and doing it in V keeps the staging step out
+		// of a shell script (which is the thing ADR-0022 says was
+		// missing in the first place).
+		bytes := os.read_file(src) or {
+			return error('read ' + src + ': ' + err.msg())
+		}
+		dst := os.join_path(os.dir(os.abs_path(r.output)), name)
+		// Skip an identical destination rather than rewriting it. A
+		// rebuild while the app is running leaves the loader DLLs locked
+		// by the OS, and an unconditional write then fails the build
+		// AFTER the binary was produced — which is the worst possible
+		// moment to report an error, and the reason `vails build` on an
+		// already-built project has to be a no-op rather than a ritual.
+		if os.exists(dst) {
+			mut already := false
+			if existing := os.read_file(dst) {
+				already = existing == bytes
+			}
+			if already {
+				skipped++
+				continue
+			}
+		}
+		os.write_file(dst, bytes) or {
+			return error('write ' + dst + ': ' + err.msg() + '\n  the binary ' +
+				'built and is at ' + r.output + '; this file is probably still ' +
+				'loaded by a running instance')
+		}
+		copied++
+	}
+	println('staged ' + copied.str() + ' side-by-side DLL(s) from ' +
+		r.dll_source + ' next to ' + r.output + (if skipped > 0 {
+		' (' + skipped.str() + ' already up to date)'
+	} else {
+		''
+	}))
+}
+
+// target_for_host maps the host OS onto buildplan's Target enum. buildplan
+// takes the target as an argument precisely so a Linux plan can be
+// asserted from a Windows CI run; this is the only place the two meet.
+//
+// It is not called `home_target`, which is the obvious name: V 0.5.2
+// reports `unknown function: host_target` for a `home_target` declared in
+// this file, and the name works fine in a module that does not import
+// `webview` — so something in the webview module graph rewrites the
+// identifier. Renaming fixed it; the reason is recorded so nobody
+// "tidies" the name back.
+fn target_for_host() buildplan.Target {
+	mut t := buildplan.Target.other
+	$if windows {
+		t = .windows
+	}
+	$if linux {
+		t = .linux
+	}
+	return t
 }
 
 // granted_service_commands flattens the capability command lists of a
@@ -303,14 +516,27 @@ fn join_modules_path(home string, old string) string {
 	return home + sep + old
 }
 
-fn doctor() {
+// doctor validates the toolchain and the project. It takes args rather
+// than hard-coding `vails.json`: a workspace with more than one project
+// in it is exactly what a build matrix looks like, and a `doctor` that
+// can only look at the cwd is useless there (ADR-0022 B1).
+fn doctor(args []string) {
 	println('vails doctor')
 	println('  vails       : ' + version)
+	// The framework's own version drift is reported here rather than
+	// fixed silently: `v.mod` and the CLI were two hand-edited numbers
+	// and they were already disagreeing (B0).
 	home := vails_home()
 	if home == '' {
 		println('  vails home  : NOT FOUND (set VAILS_HOME --- needed by `vails build` outside a checkout)')
 	} else {
 		println('  vails home  : ' + home)
+		if text := os.read_file(os.join_path(home, 'v.mod')) {
+			drift := buildinfo.version_drift(text)
+			if drift != '' {
+				println('  ! version   : ' + drift)
+			}
+		}
 	}
 	vv := os.execute('v version')
 	if vv.exit_code == 0 {
@@ -326,6 +552,15 @@ fn doctor() {
 		} else {
 			println('  webkit2gtk  : MISSING (sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev)')
 		}
+		// The tray service links a second library, and a build that fails on
+		// one missing header is a much worse first impression than a line
+		// here: the services module's C is compiled into every GUI app.
+		ind := os.execute('pkg-config --modversion ayatana-appindicator3-0.1')
+		if ind.exit_code == 0 {
+			println('  appindicator: ' + ind.output.trim_space() + ' (tray)')
+		} else {
+			println('  appindicator: MISSING (sudo apt install libayatana-appindicator3-dev - the tray service needs it)')
+		}
 	} $else $if windows {
 		gcc := os.execute('gcc --version')
 		if gcc.exit_code == 0 {
@@ -339,28 +574,76 @@ fn doctor() {
 		} else {
 			println('  webview     : MISSING (pacman -S mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader)')
 		}
+		// The five DLLs a built app cannot start without. Reported as a
+		// count of what is actually present, because `vails build` copies
+		// them and a build that silently could not is the failure this
+		// whole line exists to make visible earlier (B1).
+		present := buildplan.side_by_side_dlls.len - buildplan.missing_dlls(buildplan.ucrt64_bin).len
+		println('  side-by-side: ' + present.str() + '/' +
+			buildplan.side_by_side_dlls.len.str() + ' DLL(s) in ' +
+			buildplan.ucrt64_bin)
 	} $else {
 		println('  webview     : Windows/Linux only in this MVP (Phase 6 adds macOS)')
 		println('  note        : pure-V modules (bridge/events/assets/---) still testable here')
 	}
 	report_backends()
-	cfg_path := 'vails.json'
+	cfg_path := flag_value(args, '--config', 'vails.json')
 	if os.exists(cfg_path) {
 		cfg := config.load(cfg_path) or {
-			println('  vails.json  : INVALID (' + err.msg() + ')')
+			println('  ' + cfg_path + '  : INVALID (' + err.msg() + ')')
 			return
 		}
-		println('  vails.json  : ok (' + cfg.windows.len.str() + ' window(s), ' +
+		println('  ' + cfg_path + '  : ok (' + cfg.windows.len.str() + ' window(s), ' +
 			cfg.capabilities.len.str() + ' capabilit(ies))')
 		report_services(cfg)
+		// The dependency list is reported before the asset_root check
+		// because a missing dependency is the more expensive failure: the
+		// asset_root is one line away, a module that never got fetched is
+		// a build error three files deep.
+		if text := os.read_file(cfg_path) {
+			set := deps.parse(text) or {
+				// A malformed block is a report line, not a crash: the
+				// rest of doctor is still useful, and the message names
+				// the offending dependency.
+				println('  dependencies: INVALID (' + err.msg() + ')')
+				return
+			}
+			println('  dependencies: ' + set.summary())
+			if !set.is_empty() {
+				report_lock(cfg_path)
+			}
+		}
 		if os.is_dir(cfg.asset_root) {
 			println('  asset_root  : ok ("' + cfg.asset_root + '")')
 		} else {
 			println('  asset_root  : MISSING ("' + cfg.asset_root + '" not found - `vails run` has nothing to serve)')
 		}
 	} else {
-		println('  vails.json  : not found (optional here; `vails init` creates one)')
+		println('  ' + cfg_path + '  : not found (optional here; `vails init` creates one)')
 	}
+	// The build identity of THIS binary, last, because it is the one line
+	// that survives into whatever a user reports: an unstamped binary
+	// reports 'dev' forever, and 'dev' silently disables every update
+	// check (B0, and ADR-0020's U6 before it moved here).
+	println('  build       : ' + buildinfo.describe())
+}
+
+// report_lock says whether the resolved set on disk matches what the
+// config declares. A missing lock is a one-line note, not a failure —
+// `doctor` is a report, and a project that has simply not run
+// `v install` yet is not broken.
+fn report_lock(cfg_path string) {
+	lock_file := os.join_path(os.dir(cfg_path), deps.lock_path)
+	locked := os.read_file(lock_file) or {
+		println('               ! ' + deps.lock_path +
+			' not written yet - run `v install` before building')
+		return
+	}
+	locked_set := deps.decode_lock(locked) or {
+		println('               ! ' + deps.lock_path + ' is unreadable (' + err.msg() + ')')
+		return
+	}
+	println('               resolved: ' + locked_set.summary())
 }
 
 // report_backends lists, per service, whether THIS build has a native
@@ -402,6 +685,16 @@ fn report_services(cfg config.VailsConfig) {
 				println('                 ! ' + s.name + ' is a stub here: ' + st.note)
 			}
 		}
+	}
+	// notification has a second, config-shaped precondition: a desktop app
+	// cannot raise a WinRT toast without an AppUserModelID. Reporting it
+	// here is the whole point of doctor's backends section - the failure
+	// otherwise surfaces as a notification that never appears, with
+	// nothing in the message pointing at vails.json.
+	if picked.any(it.name == 'notification') && cfg.bundle.identifier == '' {
+		println('                 ! notification.notify needs bundle.identifier in ' +
+			'vails.json: it is the Windows AppUserModelID the toast is ' +
+			'attributed to (ADR-0018)')
 	}
 	_ = unknown
 }

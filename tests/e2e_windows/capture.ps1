@@ -1,12 +1,26 @@
 # capture.ps1 - screenshot helper for the Windows E2E proofs.
 #
 # The proofs in tests/e2e_windows/README.md need a picture of the window; this
-# makes taking one repeatable instead of a manual snip. It captures the
-# primary screen (which is what a tray balloon needs - the balloon is not part
-# of the app window) or a single window by title.
+# makes taking one repeatable instead of a manual snip.
 #
-#   .\capture.ps1 -Out ..\..\..\..\..\..\..\MyProjects\vails\tests\e2e_windows\services.png
-#   .\capture.ps1 -Out shot.png -WindowTitle "Vails Services Demo"
+#   .\capture.ps1 -Out shot.png -WindowTitle "Vails Services Demo"   # preferred
+#   .\capture.ps1 -Out shot.png                                     # whole screen
+#
+# PREFER -WindowTitle, AND THE REASON IS PRIVACY, NOT CONVENIENCE.
+#
+# Every screenshot in this directory was removed on 2026-09-29 and purged from
+# the repository's history. A full-screen capture frames the app window against
+# whatever else is on the desktop, and what was on it was: the taskbar with the
+# user's installed apps, an open terminal, a file manager, and the local
+# username in a path. Those images are not a proof problem - the status lines in
+# the README are the machine-checkable part - but they are a privacy problem,
+# and a screenshot that leaks a desktop survives in every clone forever.
+#
+# -WindowTitle captures only the app window's rectangle, after raising it, so
+# the desktop cannot end up in the frame. The whole-screen mode is still here
+# for the one case that needs it (a tray balloon is drawn by the shell and is
+# not part of any window), but it will include the desktop: close your other
+# windows, or expect it to be a picture of your desktop as well as of the app.
 param(
     [Parameter(Mandatory = $true)][string]$Out,
     [string]$WindowTitle = "",

@@ -142,4 +142,38 @@ static inline void vails_add_runtime(WebKitUserContentManager *manager, const ch
 	webkit_user_script_unref(script);
 }
 
+// --- F0: N windows on ONE GTK main loop (the Linux half of multi-window) ---
+//
+// Windows gives each window its own thread and its own message loop, because
+// that is what the webview library's `webview_run` is. GTK is the opposite
+// shape: one process-wide main loop, any number of windows, each a GtkWindow in
+// it. So the Linux multi-window answer is NOT a thread per window — it is one
+// loop and N windows, and the whole difficulty is the same on both platforms
+// for a different reason: something has to decide when the app is finished.
+//
+// "Finished" cannot be "a window was closed". Closing the settings window of a
+// two-window app must not quit the app; closing the last one must. So the
+// shim counts open windows and quits the loop when the count reaches zero.
+//
+// The count is a static in this header rather than a V global, and that is not
+// a contradiction of AGENTS.md §2: the header already holds the registered
+// trampoline targets for the same reason (a V symbol name is module-mangled,
+// so C cannot call it by name and the address has to be stashed in C). The
+// alternative — a C counter the V side polls from a g_idle_add — buys a rule
+// in exchange for a timer that fires forever.
+static int vails_windows_open = 0;
+
+static inline void vails_window_opened(void) { vails_windows_open++; }
+
+static inline void vails_window_closed(void) {
+	if (vails_windows_open > 0) {
+		vails_windows_open--;
+	}
+	if (vails_windows_open == 0) {
+		gtk_main_quit();
+	}
+}
+
+static inline int vails_windows_are_open(void) { return vails_windows_open; }
+
 #endif // VAILS_LINUX_SHIM_H

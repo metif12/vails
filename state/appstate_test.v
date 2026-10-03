@@ -1,7 +1,7 @@
 module state
 
 fn test_set_get_roundtrip() {
-	mut s := new_store()
+	mut s := new_appstate()
 	s.set('theme', '"dark"')!
 	assert s.get('theme')! == '"dark"'
 	assert s.has('theme')
@@ -10,7 +10,7 @@ fn test_set_get_roundtrip() {
 }
 
 fn test_get_unknown_fails() {
-	s := new_store()
+	s := new_appstate()
 	mut msg := ''
 	s.get('nope') or { msg = err.msg() }
 	assert msg.contains('unknown key')
@@ -18,7 +18,7 @@ fn test_get_unknown_fails() {
 }
 
 fn test_set_rejects_empty_key() {
-	mut s := new_store()
+	mut s := new_appstate()
 	mut failed := false
 	s.set('', '{}') or { failed = true }
 	assert failed
@@ -26,7 +26,7 @@ fn test_set_rejects_empty_key() {
 }
 
 fn test_set_overwrites() {
-	mut s := new_store()
+	mut s := new_appstate()
 	s.set('n', '1')!
 	s.set('n', '2')!
 	assert s.get('n')! == '2'
@@ -34,7 +34,7 @@ fn test_set_overwrites() {
 }
 
 fn test_remove() {
-	mut s := new_store()
+	mut s := new_appstate()
 	s.set('a', '1')!
 	s.set('b', '2')!
 	s.remove('a')
@@ -46,7 +46,7 @@ fn test_remove() {
 }
 
 fn test_string_helpers() {
-	mut s := new_store()
+	mut s := new_appstate()
 	s.set_string('name', 'vails')!
 	assert s.get_string('name')! == 'vails'
 	// Stored form is JSON, so a raw read sees the quoted literal.
@@ -54,7 +54,7 @@ fn test_string_helpers() {
 }
 
 fn test_string_helper_missing() {
-	s := new_store()
+	s := new_appstate()
 	mut failed := false
 	s.get_string('nope') or { failed = true }
 	assert failed

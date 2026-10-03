@@ -11,6 +11,19 @@
 .vmodules/
 .v/
 
+# The five side-by-side DLLs that `vails build` stages next to the .exe on
+# Windows (ADR-0034, B1). They are MSYS2 ucrt64 runtime + webview binaries, not
+# source, and they are ~5 MB of the same files in every build directory - so
+# without this every `vails build` leaves the tree dirty with binaries that
+# belong to the toolchain, not the repo. `*.exe` above already covers the binary
+# itself; these are the ones it missed. The app still runs: staging is a copy
+# step at build time, and it happens again on the next build.
+libwebview-*.dll
+WebView2Loader.dll
+libgcc_s_seh-*.dll
+libstdc++-*.dll
+libwinpthread-*.dll
+
 # OS / editor
 .DS_Store
 Thumbs.db

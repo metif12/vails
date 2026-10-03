@@ -45,6 +45,30 @@ fn test_support_matches_the_dispatch_branch() {
 		assert !clipboard_support().ready
 		assert !opener_support().ready
 	}
+	// menu and tray shipped on both platforms in wave 3 (ADR-0017). The Linux
+	// tray is a real StatusNotifierItem; what a headless session cannot show is
+	// the icon, which the note says rather than the boolean.
+	assert menu_support().ready
+	assert tray_support().ready
+}
+
+fn test_wave_three_services_report_their_own_reason() {
+	// A ready:true with no note is allowed (os-info is the reference case), but
+	// these two carry notes that name the mechanism, because "it works" is not
+	// what a reader of `vails doctor` needs on two platforms that answer
+	// differently.
+	assert menu_support().note.contains('menu:clicked')
+	$if windows {
+		assert tray_support().note.contains('tray:clicked')
+	} $else $if linux {
+		// Deliberately NOT asserting 'tray:clicked' here: on Linux there is no
+		// such event, because the StatusNotifier *host* owns the click and opens
+		// the menu the app attached to the item (ADR-0017). The note has to say
+		// so - a frontend that greps this for a Windows-only event name is
+		// exactly the bug this test exists to prevent.
+		assert !tray_support().note.contains('tray:clicked')
+		assert tray_support().note.contains('StatusNotifierHost')
+	}
 }
 
 fn test_status_of_resolves_by_name() {

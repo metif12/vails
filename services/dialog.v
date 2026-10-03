@@ -220,6 +220,91 @@ pub fn parse_paths(buf string) []string {
 	return out
 }
 
+// GTK response ids, as literals (AGENTS.md §2). GTK answers a dialog with one
+// of these rather than with a boolean, and the set is a GTK enum rather than
+// anything this codebase controls — the file chooser uses ACCEPT, the message
+// box uses OK/YES/NO/CANCEL.
+//
+// They live in this shared file, not in dialog_linux.c.v, for the same reason
+// `menu.wm_command` and `host_message` do (ADR-0018/0023): the *classification*
+// is the part worth testing, and the classifier has to run on every platform
+// for that to be true. A Linux-only file would make the mapping testable only
+// on the platform where it can never be run in CI.
+const gtk_response_reject = -2
+const gtk_response_accept = -3
+const gtk_response_delete_event = -4
+const gtk_response_ok = -5
+const gtk_response_cancel = -6
+const gtk_response_close = -7
+const gtk_response_yes = -8
+const gtk_response_no = -9
+
+// The button names a message box reports. A closed set of four plus 'none',
+// and the same set the Windows half produces from IDOK/IDCANCEL/IDYES/IDNO —
+// one wire vocabulary for two native button sets is the whole point.
+pub const button_none = 'none'
+pub const button_ok = 'ok'
+pub const button_cancel = 'cancel'
+pub const button_yes = 'yes'
+pub const button_no = 'no'
+
+// gtk_button_name maps a GTK response id to the frontend's button name, or
+// `none` for an id it does not know.
+//
+// The four "closed" ids are treated deliberately: DELETE_EVENT is the window
+// manager's way of saying "closed", CLOSE is the dialog's own close button,
+// REJECT is the file chooser's "this choice is not acceptable" and CANCEL is
+// the button. From a frontend's point of view all four are the same user
+// intent — declined — and reporting them as different buttons would push that
+// distinction into every app.
+pub fn gtk_button_name(rc int) ?string {
+	match rc {
+		gtk_response_ok, gtk_response_accept {
+			return button_ok
+		}
+		gtk_response_yes {
+			return button_yes
+		}
+		gtk_response_no {
+			return button_no
+		}
+		gtk_response_cancel, gtk_response_reject, gtk_response_delete_event,
+		gtk_response_close {
+			return button_cancel
+		}
+		else {
+			return none
+		}
+	}
+}
+
+// gtk_message_result turns a GTK message-box response into the same Result the
+// Windows MessageBoxW half produces, so the two platforms answer identically.
+//
+// The accepted/declined split is the same rule as Windows (IDOK/IDYES are an
+// answer, IDCANCEL/IDNO are not), which is what keeps `dialog.message`
+// platform-independent for a frontend.
+pub fn gtk_message_result(rc int) Result {
+	name := gtk_button_name(rc) or {
+		return Result{
+			canceled: true
+			button:   button_none
+		}
+	}
+	accepted := name == button_ok || name == button_yes
+	return Result{
+		canceled: !accepted
+		button:   name
+	}
+}
+
+// gtk_chooser_accepted reports whether a file chooser's response means the user
+// picked something. Only ACCEPT does; CANCEL, DELETE_EVENT and a closed window
+// are all a refusal, and a refusal is a normal result rather than an error.
+pub fn gtk_chooser_accepted(rc int) bool {
+	return rc == gtk_response_accept
+}
+
 // dialog_rc maps a backend return code to a Result: 0 is a cancellation (a
 // normal result), a negative code is a failure carrying the backend's own
 // message, anything else is a success with the paths in buf.

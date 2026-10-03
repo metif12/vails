@@ -18,6 +18,11 @@ import events
 // native handle; it is only ever invoked from V, never from C.
 pub type EvalFn = fn (js string) !
 
+// CloseFn closes one window. A plain function pointer (not a method) so a
+// backend can hand over a closure over its own native handle; it is only ever
+// invoked from V, never from C. nil until the backend has built the window.
+pub type CloseFn = fn ()
+
 // Ctx is the window-scoped runtime handle. Keep one per window (the app
 // stores the copy it receives in Config.on_ready) and pass it to services.
 // Fields are public because the native backends construct it.
@@ -31,6 +36,49 @@ pub mut:
 	// Linux) used to parent native UI (dialogs, menus, tray) to this
 	// window. nil means "unknown" — callers must degrade, not crash.
 	parent voidptr = unsafe { nil }
+	// toplevel is the window's top-level *widget*, which is the handle some
+	// toolkits need and `parent` is not. On Windows the two are the same HWND.
+	// On Linux they are different objects: `parent` is a GdkWindow and
+	// `toplevel` is the GtkWindow that owns it, because GTK APIs that take
+	// "the window" (a menu bar, a transient parent) want the widget and not
+	// the drawable. There is no way to recover one from the other, so this is
+	// a separate field rather than something a service derives.
+	// nil means "unknown", exactly as for parent.
+	toplevel voidptr = unsafe { nil }
+	// main is the per-window job queue + wakeup seam (U0, ADR-0019): the
+	// thing a spawn()ed worker hands a closure to, so the window thread runs
+	// it. A pointer, not a value, because Ctx is copied by value in several
+	// places and the queue must be shared by every copy.
+	//
+	// nil means "no live window" — a hand-built Ctx in a test, or a platform
+	// whose backend has not run. post_to_main says so rather than dropping
+	// the job, because a dropped job looks exactly like a hung download.
+	main &MainThread = unsafe { nil }
+	// close_fn is the backend's "close this window" hook, filled in when the
+	// native window exists. nil means this window cannot be closed
+	// programmatically, which `close` reports rather than pretending. It exists
+	// because F0 made windows a set rather than a singleton — with one window
+	// the OS window manager is enough, and with several an app needs to be able
+	// to say "close the other one" without holding a second, differently-typed
+	// handle to it. Same shape as eval_fn: a plain function pointer, nil until
+	// the backend wires it.
+	close_fn CloseFn = unsafe { nil }
+}
+
+// close asks the backend to close this window. A window that cannot be closed
+// programmatically says so; it is not a silent no-op, because "the window is
+// still open" and "the window is closing" are different states to an app.
+pub fn (c Ctx) close() ! {
+	if c.close_fn == unsafe { nil } {
+		return error('vails: this window cannot be closed programmatically ' +
+			'(label "' + c.label + '": no backend close hook)')
+	}
+	c.close_fn()
+}
+
+// can_close reports whether a close hook is available.
+pub fn (c Ctx) can_close() bool {
+	return c.close_fn != unsafe { nil }
 }
 
 // emit delivers one event to the frontend through window.vails.__emit
@@ -56,7 +104,22 @@ pub fn (c Ctx) has_parent() bool {
 	return c.parent != unsafe { nil }
 }
 
+// has_toplevel reports whether the top-level widget handle is available. A
+// service that needs it (the window menu bar) must check, because a Ctx built
+// by hand in a test has none.
+pub fn (c Ctx) has_toplevel() bool {
+	return c.toplevel != unsafe { nil }
+}
+
 // is_ready reports whether the context is wired to a live window.
 pub fn (c Ctx) is_ready() bool {
 	return c.eval_fn != unsafe { nil }
+}
+
+// has_main reports whether the per-window job seam is available. A Ctx built
+// by hand in a test has no queue, and post_to_main refuses there with a named
+// error instead of silently dropping the job — a dropped job is
+// indistinguishable from work that never finished.
+pub fn (c Ctx) has_main() bool {
+	return c.main != unsafe { nil }
 }

@@ -2,7 +2,7 @@
 
 Notable changes to Vails. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow the
-CLI's own version (`vails version`, `const version` in `cli/vails.v`).
+framework version (`vails version`, `buildinfo.framework_version`).
 
 Conventions for this file:
 
@@ -15,6 +15,530 @@ Conventions for this file:
 - Every PR adds its lines to `## [Unreleased]` — see `AGENTS.md` §5.
 - Architectural decisions do not live here; they live in `docs/ADR/`. An ADR
   is referenced by number in the entry that implements it.
+
+## [Unreleased]
+
+### Added
+
+- **`webview.run_many` opens more than one window on Windows** (ADR-0035).
+  The blocker was never the routing - that was already proven with two fake
+  eval sinks - it was that WebView2 binds the HWND, the COM apartment and the
+  message pump to the thread that created the window. Windows beyond the first
+  therefore run on a thread each, and a `spawn`ed thread has **no COM
+  apartment**, which is why the old code refused a second window by name
+  instead of crashing. Each window's thread now calls
+  `CoInitializeEx(NULL, COINIT_APARTMENTTHREADED)` before `webview_create`
+  and `CoUninitialize` after `webview_destroy`, and the refusal is gone.
+  **Not yet observed**: this machine's `webview` test module crashes the host,
+  so the run that would prove two windows actually opening has not happened.
+  Treat the second window as written-and-type-checked, and see "What is claimed
+  and what is not" in ADR-0035.
+- **`webview.check_windows(cfgs)`** (ADR-0035). The rules `run_many` applies
+  before any window exists - at least one window, every config valid, no two
+  windows sharing a label - as a callable function. A test can now ask "would
+  two windows be accepted?" without opening two WebView2 windows, which is the
+  only reason the multi-window validation is testable at all.
+
+### Changed
+
+- **`v test .` on Windows now needs `-ldflags "-lws2_32"`**
+  (ADR-0034). This is a V 0.5.2 bug, not a Vails one: the
+  `dependency_scan_fallback` link path emits `-l` flags from `#flag`
+  *before* most object files, and GNU `ld` only resolves an archive
+  against the objects that precede it — so `net.http`'s `ws2_32` is on
+  the link line and cannot resolve anyway. A `#flag` in the importing
+  module does **not** fix it (tried, reverted); `-ldflags` does, because
+  it is emitted last. The command in `AGENTS.md` §1 is updated, and
+  `buildplan.cli_flags` explains it next to the code.
+- **`vails doctor` takes `--config`** (ADR-0034). It hard-coded
+  `vails.json`, which made it useless in a workspace with more than one
+  project in it — which is exactly what a build matrix looks like.
+- **`v.mod`'s `version` is now checked against the framework version**
+  (ADR-0034). They were two hand-edited numbers and they were already
+  disagreeing (0.2.0 vs 0.4.0); `v.mod` is now 0.4.0 and a test fails if
+  they drift again. The framework version lives in
+  `buildinfo.framework_version`.
+- **`state.Store` is now `state.AppState`**, and `new_store()` is
+  `new_appstate()` (ADR-0030). The reason is a collision: the ROADMAP lists a
+  persisted `store` service for durable key-value data, and the two differed by
+  the case of one letter in a language whose house style is snake_case — the
+  same word, two meanings, unreadable in prose. The bare word `store` went to
+  the thing that persists (matching Tauri, where `tauri-plugin-store` is
+  exactly that) and the in-memory type took the name its own doc comment
+  already claimed. **The public API is unchanged** — `set_state` / `get_state`
+  / `has_state` were always the only surface, and the generated `.d.ts` never
+  carried the name — so an app built on `application` needs no change. Only a
+  direct `import state` + `state.Store` does, and in this repository the sole
+  importer was `application` itself. `state.AppState` and the persisted
+  `store` are **not** interchangeable and are not merged: one is a
+  main-thread in-process map, the other is a capability-gated service touched
+  by workers.
+
+### Added
+
+- **`webview.Window` / `WindowRegistry` / `emit_to` — address a window by label**
+  (ADR-0035, F0, in part). With more than one window, `ctx.emit` through a
+  single `Ctx` is a bug with no symptom: the event is delivered, the promise
+  resolves, and the **wrong** page's status line changes — invisible to a
+  single-window test suite and to a single-window screenshot. `emit_to(label,
+  event, data)` makes the caller name the window and never hold a `Ctx` it could
+  use by mistake. Every branch is a bug that was reachable before and is now
+  pinned by a test: an **unknown label is an error and nothing is delivered
+  anywhere** (the tempting fallback to "the first window" delivers to a real and
+  wrong page — a missing route that looks like a success), a window that is not
+  `ready` is refused **naming its state** (a nil `eval_fn` is a crash, not an
+  error), and **two windows may not share a label** — which would be a
+  capability hole and an ambiguous route at once.
+  - `Window{label, ctx, state}` with a `created → ready → running → closed`
+    lifecycle, `Config.on_window` to hand an app the backend's own `&Window`,
+    and `emit_all` / `stop_all` for "tell both pages" and "quit N windows".
+    `emit_all` reports the **first** failure rather than continuing, because a
+    partial broadcast that silently skipped one window is the same bug again.
+  - `run_many([]Config)` is the entry point; `run(cfg)` is unchanged and is
+    exactly its one-element case, so every existing app is unaffected by
+    construction.
+  - `Ctx.close()` / `can_close()`: with several windows an app needs to say
+    "close the other one". A window with no backend hook says so rather than
+    pretending.
+  - **Windows: N windows, one thread each.** WebView2 binds the HWND, the COM
+    apartment and the message pump to the thread that created the window, and
+    `webview_run` blocks per instance — so window 2..N each need a thread, and a
+    `spawn`ed thread has **no COM apartment**, which is why this used to refuse a
+    second window by name. Each window's thread now calls `CoInitializeEx(NULL,
+    COINIT_APARTMENTTHREADED)` before `webview_create` and `CoUninitialize`
+    after `webview_destroy`. **Not yet observed** — see the Added entry above.
+  - **Linux is structurally done** — one GTK main loop with any number of
+    windows in it, quitting when the *last* window closes (the single-window
+    version quit on the first).
+  - **A window label is injected into the page** (`window.vails.label`), because
+    F0 loads one document into every window and the page otherwise cannot tell
+    which window it is. It is single-quoted and JS-escaped: `jsesc.escape` does
+    **not** escape `"`, so a double-quoted literal was a script injection from a
+    `vails.json` field into every page of the app. Found by a test written while
+    landing this, and pinned by three now.
+- **`webview.post_to_main(ctx, fn ())` — a worker can hand a closure to the
+  window thread** (ADR-0019, U0/W0, Windows). ADR-0010 says handlers run on the
+  main thread and slow work belongs on a `spawn`ed worker, but there was no
+  way back: `ctx.emit` ends in `webview_eval` on a thread the webview object
+  does not own, so a worker computed its result and dropped it on the floor. A
+  posted job is now the unit — a `fn ()` the window thread runs — and the OS
+  message is only a wakeup on its own `WM_APP+2` id, deliberately not
+  `host_message`, so a wakeup can never reach a live tray as a "left click".
+  `webview.run` puts a `&MainThread` on the `Ctx` it hands to `on_ready`, so
+  the pattern is `spawn` + `post_to_main` and the service knows nothing about
+  the queue, the subclass or the message id. Safe to call from any thread: the
+  queue is behind a real `sync.Mutex`, and `take()` releases it before running
+  the batch, so a job that posts again cannot deadlock a non-recursive
+  `SRWLOCK` (there is a test for exactly that).
+  - **`post_to_main` refuses by name instead of dropping the job.** A `Ctx`
+    with no live window, or a window with no wakeup, returns an error saying
+    what to pass — a dropped job is indistinguishable from slow work.
+  - **Linux is not included.** The `g_idle_add` trampoline is unwritten — it
+    is the first push onto the GTK main loop from a foreign thread, and
+    nothing in the repo has ever done that — so `post_to_main` returns
+    `... is not available on linux yet`. `webview.run` still builds and
+    destroys a `MainThread` there to keep the shape symmetric.
+- **`vails build` produces a binary that starts** (ADR-0034, B1). It used
+  to shell out to `v -o <out> <dir>`, print *"DLLs stay side-by-side on
+  Windows; packaging arrives in Phase 7"*, and copy nothing — the five
+  loader DLLs existed only as `#` comments in the READMEs. It now stages
+  them from `C:\msys64\ucrt64\bin` when
+  `bundle.windows_dll_side_by_side` is set (a config field that has
+  existed since T6 and was never acted on), reports the individual files
+  it could not find rather than a generic failure, applies `-gc none` on
+  Linux from inside the build rather than from a CI command, and is
+  idempotent so a rebuild over a running app is a no-op instead of a
+  failure *after* a successful compile.
+- **`vails build --version <semver>` stamps the build** (ADR-0034, B0).
+  The app reads it with `buildinfo.version()`, so no generated file and no
+  `-ldflags` are involved. The argument is validated first: `1.0`,
+  `1.2.3.4`, `01.2.3` and an empty string are refused (the updater
+  *compares* this string, so `1.0` and `1.0.0` would be different
+  versions), while `v1.2.3`, `1.2.3-rc.1` and `1.2.3+build.5` are
+  accepted. An unstamped binary reports `dev`, and `vails doctor` says so
+  in words — a release nobody stamped looks exactly like a development
+  build, and `dev` silently disables every update check.
+- **The first CI** (ADR-0034, B2/B3): a `Dockerfile` on V's own published
+  `thevlang/vlang:ubuntu-build` image, and `.github/workflows/ci.yml`
+  with a Linux job that runs in it and a Windows job on a native MSYS2
+  runner. The Windows job asserts that the artifact `vails build`
+  produced can start, which is the reason B1 came first. A tag also
+  triggers a version-stamped release build.
+- **`vails deps` and the `dependencies` block in `vails.json`**
+  (ADR-0034, B5). `{"name": "vlang.leveldb", "version": ">=1.0.0"}` — the
+  `v.mod` shape, with a `{"name": ">=1.0"}` map accepted as a fallback.
+  `vails deps` lists what is declared and diffs it against `vails.lock`;
+  `vails doctor` reports both. **It does not fetch.** Vails declares and
+  reports; VPM (`v install`) resolves, because the moment Vails keeps its
+  own resolved tree a hand-run `v install` and a Vails-run one can
+  disagree and the build depends on which ran last. This is what makes
+  ADR-0031's `ui2` tier and ADR-0032's data services reachable at all:
+  `ui2`, `leveldb` and `vsql` are in no V installation.
+- **`sqlreg` — the `sql` security policy as code** (ADR-0034, D0). The
+  decision ADR-0032 recorded in prose is now the thing D3 will be written
+  against: a page **names** a query and V owns the statement. SQL text
+  from a page is not a query name and never becomes SQL; multiple
+  statements are refused *at registration*, so a statement that could
+  smuggle a second one is never in the registry; parameter values are
+  bounded (a bound on the statement is not a bound on the value); a named
+  parameter the statement does not contain is refused; and read/write are
+  separate grants. The registry has no mutating entry point at all — that
+  absence is the threat model. No database is behind it yet; D3 adds
+  `vsql`.
+- **Four new pure-V modules**, all testable on Windows with no C, no
+  network and no toolchain: `buildinfo` (build identity), `buildplan`
+  (what a build runs and stages, with the target as an *argument* so a
+  Linux recipe is asserted on the Windows CI run), `deps` and `sqlreg`.
+  `v test .` is 36/36.
+
+- **`menu.set_menu` installs the window's menu bar** (ADR-0023). `menu.popup`
+  was a right-click menu; this is the bar along the top of the window, with
+  drop-downs, and it takes the *same* `MenuItem` array, the same id rules and
+  the same `menu:clicked` event — so a frontend that already listens for a menu
+  choice serves both with one handler. It is not modal: the command installs
+  the bar and returns, and the user picks from it whenever they like.
+  `set_menu({items: []})` removes the bar, so an app that shows and hides its
+  own chrome does not need a second command.
+- **The window host seam now takes more than one hook** (ADR-0023). Two
+  services need to hear from the same window — the tray's `WM_APP+1` and the
+  menu bar's `WM_COMMAND` — so `attach` no longer implies a single handler, and
+  a handler now says whether it *consumed* the message. A message a hook does
+  not recognise is passed to the next subclass in the chain and, eventually, to
+  the webview library, which is what keeps an installed tray icon or menu bar
+  from silently breaking the page. This corrects a claim in
+  `webview/host_shim.h` and `webview/host.v` that there is "exactly one hook per
+  window" — true only while there was one caller.
+- **`Ctx` gains `toplevel`**: the window's top-level *widget*. The same HWND as
+  `parent` on Windows; on Linux the `GtkWindow` that owns the `GdkWindow`, which
+  is what GTK APIs that take "the window" (a menu bar, a transient parent) want.
+  A window menu bar needs it, and so does the GTK dialog still to come.
+- **`vails dts` output** for the new command: `menu.set_menu(params:
+  MenuPopup): Promise<string>` in the generated `.d.ts` and
+  `v.menu.set_menu(params)` in the service snippet. An app that calls it needs
+  `menu.set_menu` in its `vails.json` capability grant, like any other command,
+  or it gets `forbidden:`.
+- **The Linux `menu` probe grew a `menubar` case**, and `run_services.sh` clicks
+  the bar for it. It is the one proof in the Linux suite that is provable
+  *further* than a human check: the bar is a normal widget in the window, so a
+  click lands and the screenshot carries the resulting `menu:clicked` id.
+- **`tray.set_menu` attaches a menu to the tray icon** (ADR-0026). It takes the
+  *same* `MenuItem` array as `menu.popup`, and the choice arrives on the *same*
+  `menu:clicked` event — so a frontend with one menu listener serves a
+  right-click popup, a window menu bar and a tray menu. `set_menu({items: []})`
+  removes it, as in ADR-0023.
+- **`vails dts` output** for it: `tray.set_menu(params: MenuPopup): Promise<string>`,
+  and `v.tray.set_menu(params)` in the service snippet. An app that calls it
+  needs `tray.set_menu` in its `vails.json` capability grant or it gets
+  `forbidden:`.
+- **The Linux `tray` probe grew a `traymenu` case** (`tests/e2e_linux/traymenu.png`).
+  On Linux the StatusNotifier *host* opens this menu, so nothing comes back
+  through the bridge and there is no click to simulate — the proof is that the
+  command resolved, plus, on Windows, that a right click really opens the menu.
+- **`dialog` works on Linux** (ADR-0027). It was a stub returning `not
+  implemented on linux`, on the stated grounds that it "needs a Linux
+  toolchain" — a reason that had expired two waves earlier. It is now a real
+  `GtkFileChooserDialog` / `GtkMessageDialog`, parented to the window's
+  `GtkWindow` (which is what GTK wants, and is *not* `Ctx.parent`), with
+  overwrite confirmation on save and correct UTF-8 filename conversion. Same
+  buttons, same result shape and same ids as the Windows Common Item Dialog.
+- **A `dialog.*` call with no display now fails with a message naming the
+  cause** ("no display available") instead of crashing inside GTK. GTK requires
+  `gtk_init` before any other call and has nothing sensible to say when it was
+  skipped; this is a path a service can genuinely be called on before the
+  webview is up.
+- **`notification` shows a real Windows 10/11 toast** (ADR-0018). It was a
+  tray balloon — `Shell_NotifyIconW` with `NIF_INFO` — which Windows 11
+  attributes to the bare `.exe`, cannot carry an app name or icon, and which
+  needed a V worker to delete its tray icon afterwards. It is now a WinRT
+  toast (`Windows.UI.Notifications`, behind a new `services/toast_shim.h`): a
+  real Action Center notification carrying the app's own name, with no tray
+  icon and nothing to clean up. The notification **document is built in pure
+  V** and unit-tested, which is the part that is easy to get wrong and hard
+  to debug. `vails init` scaffolds a working `bundle.identifier` and
+  `vails doctor` names it when `notification` is granted without one, because
+  an unpackaged app cannot raise a toast without an AppUserModelID and the
+  failure is a notification that never appears. See ADR-0018.
+- **`vails.json` gains `bundle.identifier`**: the app's stable identity, and
+  on Windows the AppUserModelID notifications and taskbar grouping are keyed
+  by. Optional — only `notification` needs it — and validated against the
+  shell's own charset rules. An app upgrading an older `vails.json` that
+  wants notifications must add it; the service refuses with a message naming
+  the field rather than guessing an id.
+
+### Changed
+
+- **A right click on a tray icon that has a menu attached no longer emits
+  `tray:clicked`** (ADR-0026). This is the one deliberate behaviour change to an
+  event that already shipped, and it is worth reading before upgrading. With a
+  menu attached, the right click opens the menu and the event does not fire; with
+  no menu attached, **nothing changes at all** — an app that never calls
+  `tray.set_menu` sees an identical event stream. The alternative (open the menu
+  *and* still emit) was rejected because one physical click would then deliver two
+  independent signals. A **left click is never taken by the menu**, even with one
+  attached. `set_menu({items: []})` restores the old behaviour outright.
+- **`notification.notify` now resolves with the mechanism that ran**
+  (`'toast'`) instead of `''`. The generated type is still `Promise<string>`,
+  so no `.d.ts` needs regenerating, but a caller that compared the result to
+  `''` must stop. This is the only machine-checkable evidence a toast
+  produces, which is what makes an E2E run provable.
+- **The tray balloon is removed rather than kept as a fallback**: a
+  notification that changes mechanism depending on the machine is harder to
+  reason about than one that fails loudly. `notification.notify` therefore no
+  longer requires a window handle (a toast is not owned by a window), the
+  `NIF_INFO`/`NIIF_*` constants are gone from
+  `services/trayicon_windows.c.v` (now the tray's primitive alone), and
+  `notification` no longer installs a tray icon at all.
+- The `services` module's C links four more Windows libraries
+  (`runtimeobject`, `shell32`, `ole32`, `advapi32`) and pulls in a 1.2 MB
+  WinRT header for every `services` test compile — measured at ~0.5 s per
+  file, which is why the alternative (hand-declared vtbls) was not needed yet.
+- The `examples/services` tray probe reports its outcome **to the page**, not
+  only to the log. On Linux the probe always ends in "there is no click to
+  simulate", and an `eprintln` is not something a screenshot can carry, so the
+  tray panel used to sit empty in the run it exists to document. The E2E
+  screenshot now shows why.
+- **The Linux window is now a vertical box holding the webview**, rather than
+  the webview being the window's only child. A `GtkWindow` holds exactly one
+  child, so a menu bar installed after the fact had nowhere to go; reserving
+  row 0 makes one possible. An app with no menu bar is unaffected — the view
+  still gets the whole client area — but the layout is now the backend's rather
+  than GTK's single-child default.
+- `webview/host_shim.h` and `webview/host.v` no longer claim there is "exactly
+  one hook per window". They never guaranteed one; there was only ever one
+  caller, and the seam now has two (ADR-0023).
+- `tests/e2e_linux/run_services.sh` writes a screenshot **named after the
+  probe** instead of one shared `services.png`. It used to write the same file
+  for every probe, so each run silently overwrote the previous proof — which is
+  not theoretical: `services.png` and `notification.png` were byte-identical,
+  and the clipboard round trip the README cites as proven had been destroyed by
+  a later notification run. The clipboard proof has been re-taken.
+
+### Fixed
+
+- **An installed tray icon no longer swallows the window menu bar's
+  `WM_COMMAND`** (ADR-0026). The tray's host-message handler branched on a
+  `bool` that meant both "the attached menu owns this message" and "this message
+  is not the tray's at all", so it answered the second case by opening the tray
+  menu and consuming the message. The visible effect was that a window with both
+  a tray icon and a menu bar stopped responding to the bar. The two cases are now
+  separate outcomes of one pure `decide` function, and the regression is pinned by
+  a test — the previous tests covered the predicates individually and so passed
+  throughout, because the bug was in how their answers were combined.
+- **The `menu` service works on Linux.** It did not compile, and once it
+  compiled it still did not work: `menu.popup` created a native window the
+  user never saw, and `menu.close` emitted no event at all. Four separate
+  faults, all now fixed — see `tests/e2e_linux/README.md` for the full
+  account. The short version: GTK3 has no `item-activated` signal (so the
+  per-item `activate` connection replaced a connection that could never fire),
+  `gtk_menu_popup_at_pointer(NULL)` never maps a menu (so the popup anchors to
+  the window's own GdkWindow at the pointer instead, which is where Windows
+  puts it too), `gtk_menu_popdown` does not emit `deactivate` (so the teardown
+  is now shared by the signal and by `menu.close`, and guarded so the context
+  is freed once), and two of the GTK calls the file used do not exist in GTK3
+  at all.
+- **`vails doctor` no longer implies a Linux tray click exists.** The Linux
+  `tray` note used to name the mechanism without saying that
+  `tray:clicked` — the event a frontend will actually wait for — does not
+  happen on Linux, because the StatusNotifier *host* owns the click and opens
+  the item's menu. It now says that, and the unit test asserts the absence, so
+  the two platforms cannot drift apart silently.
+- The Linux `menu` note in `vails doctor` named the wrong signal. It claimed
+  the backend uses GTK's `activate` on the menu; it connects `activate` on
+  each `GtkMenuItem`. The note is what `doctor` prints, so it now names the
+  real mechanism.
+
+### Not done in this release
+
+- **`menu.set_menu` is unproven at runtime on Windows.** It compiles and links,
+  and the pure-V classifier behind it (`bar_click`) is unit-tested on every
+  platform, but the E2E window would not come up in the capture session, so
+  no Windows screenshot exists. The one-command manual check is in
+  `tests/e2e_windows/README.md`. On Linux it is fully proven: the bar renders
+  and a click produces `menu:clicked` with the right id. See ADR-0023.
+- The **toast is unproven at runtime**. It compiles and links on Windows, but
+  this machine's Windows 11 image has no WinRT component DLLs, so
+  `RoGetActivationFactory` returns `CLASS_E_CLASSNOTAVAILABLE` for every WinRT
+  class and no toast can be raised here. The AUMID registration and the
+  loud-failure path *were* proven; the toast appearing in the Action Center
+  was not. The exact state and the one-command manual check are in
+  `tests/e2e_windows/README.md`. See ADR-0018, "Verification status".
+- The Linux `menu:clicked {id}` mapping is still unproven. The id table is
+  unit-tested and the popup and the dismissal event are screenshot-proven, but
+  proving that a *click* lands on the right item needs a pointer inside an
+  open menu, and under Xvfb there is no window manager, so the menu takes the
+  first click as a focus click. A real desktop session settles it.
+- Planned frontend track (Vite + web frameworks, ADR-0016): type-safe
+  bindings generated from V handler structs and injected into the
+  frontend (`vails-bindings.d.ts` + `vails-client.ts`), JS/V helpers
+  replacing the repetitive `call(method, "")` / manual `json.encode` /
+  untyped `onEvent` boilerplate, and `gen-bindings` / `init --template
+  vite-vanilla-ts|vite-vue` / `run --dev` / dist-embedding `build`
+  wiring. Ordered F0→F4 after Phase 5 S1 wave 3 + Phase 5b, before
+  Phase 7; no code yet, ROADMAP track only.
+- Planned self-updating track (ADR-0019 + ADR-0020, ROADMAP track U):
+  a Wails v3-style updater for a Vails app — check GitHub Releases (then a
+  static manifest endpoint), download the asset for the running OS+arch,
+  verify a SHA-256 digest **and** an Ed25519 signature against the bytes
+  actually received, show the release notes, then swap the running binary
+  and relaunch without a separate helper executable (the helper is the
+  current binary re-executed with sentinel env vars). Struck from the
+  ROADMAP's "out of scope" list: the reason it was ever out of scope was
+  that V was assumed to lack the crypto, and it does not —
+  `vlib/crypto/ed25519` is complete, `net.http` has real streaming
+  downloads, `crypto.sha256` streams, and `os.rename` is exactly the
+  rename-aside a Windows `.exe` swap needs. No code yet.
+- **The update UI is the app's own window, not a framework-owned one.**
+  Vails has no second window — `webview.run` creates one and blocks — so
+  the service answers `updater.state` and emits `updater:*` events, and
+  the framework ships the *look* as `updater.default_html()` (state icon,
+  version pill, Markdown notes, one primary action, `prefers-color-scheme`)
+  for the app to inject or replace. It also means the updater is granted
+  `updater.*` like any other service: an app that does not want a page
+  reaching its filesystem simply does not grant it.
+- **A new prerequisite, planned first: `webview.post_to_main`** (ADR-0019).
+  ADR-0010 says slow work runs on a `spawn`ed worker and reports back as an
+  event — but `eval_fn` is main-thread-only, so today a worker can compute
+  a result and has no way to hand it to the page. ADR-0017's seam is the
+  wrong shape for it (Windows-only, one handler per window, integer
+  payload), and three already-planned items want the same thing:
+  the `window` service, `menu.set_menu`'s `WM_COMMAND`, and the
+  updater's download progress.
+- Planned window chrome track (ADR-0021): frameless windows and a title bar
+  the app draws itself, via `window.chrome.mode: "native" | "frameless"`
+  and a `window` service. It absorbs the ROADMAP's S1 wave-4
+  `window-state` / `positioner` items, which would otherwise have shipped as
+  two small services doing half of what this one does. **`webview` 0.12 has no
+  window-chrome API at all** — the whole surface is `create / destroy / run
+  / terminate / dispatch / get_window / get_native_handle / set_title /
+  set_size / navigate / set_html / init / eval / bind / unbind / return /
+  version` — and Vails does not own its window the way Wails does, so
+  frameless is applied to the existing HWND through the seam ADR-0017 already
+  installed rather than requested at creation. "A custom title bar" is not a
+  separate mode; it is `frameless` plus an app that draws its own bar.
+- Planned build & release track (ADR-0022): the repo's **first CI**, with a
+  Linux container built on V's own published base image, a Windows job on a
+  native runner, a pinned `webview` 0.12, and a release on a tag that emits
+  the manifest the updater consumes. Windows is not built from a Linux
+  container here and the plan says why: the backend needs MSYS2 ucrt64 and
+  the *Windows* import library of a C++ `webview` linked to WebView2, so
+  cross-compiling it is its own project. The first job is not the workflow
+  but a `vails build` that produces a **runnable** binary — the five
+  side-by-side DLLs are currently copied by nobody and exist only as `#`
+  comments in the READMEs, so a first CI would otherwise ship a green tick
+  and an `.exe` that cannot start. No code yet.
+- **Version stamping moved out of the updater's U6 and into the build
+  track's B0**, because CI needs a stamped version before the updater
+  exists, both need it exactly once, and one shared implementation that lands
+  first is the point. `vails build --version 2.0.0` emits
+  `-d vails_version=2.0.0`; an app reads
+  `const build_version = $d('vails_version') or { 'dev' }`. B0 also has to
+  reconcile a drift that already exists: `v.mod` says `0.2.0` and
+  `cli/vails.v` says `0.4.0`.
+- Planned distribution track (ADR-0024): a Windows installer (Inno Setup,
+  per-user), a lightweight hand-built AppImage, and a Flatpak — all generated
+  from `vails.json`, none of them requiring a tool nobody has installed. The
+  decision that governs it: **the packaging format decides who updates the
+  app**, so `vails.json` gains `bundle.update_channel` and the updater reads
+  it rather than guessing. An app under `Program Files` cannot self-update
+  without elevation, which makes per-user install a functional requirement
+  rather than a preference; a Flatpak build refuses the in-app updater at
+  startup and says who owns updates instead. The five side-by-side DLLs stop
+  being `#` comments in two READMEs and become something the installer, CI
+  and `doctor` all read — which also resolves ADR-0005's static-vs-side-by-side
+  question, open since Phase 1. No macOS artifact: Phase 6 has no backend.
+- Planned platform-gaps + showcase track (ADR-0025): **multi-window (F0) and
+  drag & drop (F1)** — the only two rows where Vails lacks a *shell*
+  capability that both Wails and Tauri ship as a worked example, against a new
+  `docs/COMPETITIVE-MATRIX.md` that replaces "better than every sample app"
+  (a superlative with no definition) with one checkable row per capability.
+  F0 is deliberately **not** part of the showcase: it is on the critical path
+  of the window-chrome track, `tray.set_menu` and the updater's own UI, and
+  inside a demo it would read as work that can be sequenced last. It also
+  **reopens a decision in ADR-0020** — the framework-owned updater window was
+  rejected there only because one window is all Vails had, so the rejection is
+  now conditional rather than withdrawn. The showcase replaces
+  `examples/services` as the E2E vehicle instead of joining it, since that
+  example has already outgrown its role by becoming five probe modes.
+  `EnableWebDrop` is called out in advance: it is a WebView2 *host* setting,
+  not on the `webview` 0.12 surface, and it is the first thing F1 has to check
+  — a manifest promising a service with no reachable native implementation is
+  worse than no service.
+
+## [0.4.0] - 2026-09-28
+
+Phase 5 S1 wave 3: the window host seam, and the two services that are driven
+by the OS rather than by the page.
+
+### Added
+
+- **The window host seam (`webview/host.v`, ADR-0017)**: a window procedure
+  that can call *into* V. `attach(ctx, handler)` stacks a comctl32
+  `SetWindowSubclass` on the window the webview library created, so a native
+  message reaches a V handler; `post_message` sends one (that is how a modal
+  native menu is dismissed); `detach` removes the hook. It is installed **on
+  demand** — never by `webview.run` — so an app that uses no service needing a
+  callback has no subclass on its window at all. Every message the seam does
+  not own goes to `DefSubclassProc`, because a message that does not reach the
+  webview library's original procedure breaks WebView2. The seam is
+  Windows-only: on Linux the OS-initiated direction is per-object, so
+  `attach`/`post_message` say so instead of pretending.
+- **`menu`**: `menu.popup` opens a real native popup — `TrackPopupMenuEx` on
+  Windows, `GtkMenu` on Linux — with items, separators, disabled items and
+  submenus. The choice comes back as an **event** (`menu:clicked` with the
+  item id, or `menu:canceled`), never as the command's result, so one
+  frontend contract serves a modal Windows menu and an immediate Linux one;
+  `menu.close` dismisses the open popup. Item ids are restricted to
+  `[A-Za-z0-9_.:-/]` because the id also travels as a Windows menu command
+  id, and labels refuse `&` because that is the Windows mnemonic marker and
+  the user would see a different string than the frontend sent. See ADR-0017.
+- **`tray`**: `tray.set` installs an icon in the notification area
+  (`Shell_NotifyIconW` on Windows, a `libayatana-appindicator`
+  StatusNotifierItem on Linux) and `tray.destroy` removes it. A click is an
+  OS-initiated `WM_APP+1` that reaches V through the host seam and is
+  reported as `tray:clicked {button}`. This is the first service in Vails
+  that the OS drives, and it needs a new build dependency on Linux
+  (`libayatana-appindicator3-dev`), which `vails doctor` reports. See
+  ADR-0017.
+- **`services.simulate_click`**: manufactures the message a tray click sends,
+  so the whole native-message → V → event → JS loop is provable without a
+  human moving a mouse. It is not a command and cannot be granted. On Linux it
+  refuses with the real reason (there is no click to simulate: the tray host
+  opens the item's menu).
+- `examples/services` grew the two services plus `menu` and `tray` probes, and
+  the demo page reports the three new events.
+
+### Changed
+
+- **`notification` and `tray` share one Windows shell-icon primitive.**
+  `services/trayicon_windows.c.v` now owns `NOTIFYICONDATA` and the
+  add/remove calls, because the shell identifies an icon by `(hWnd, uId)`:
+  two services on the same window must use different ids, and the balloon's
+  lifetime worker deleting the tray's icon would have been a very confusing
+  bug rather than an obvious one.
+- **`menu.set_menu` is explicitly not part of the `menu` service**: a window
+  menu bar is `SetMenu` plus `WM_COMMAND` routing, which is a service of its
+  own. It is recorded as the next `menu` item rather than shipped half-done
+  behind the same prefix.
+- `vails doctor` reports 7/7 native backends on Windows, and the Linux notes
+  now say the parts that are true there (a tray item needs a
+  StatusNotifierHost to be drawn; a menu choice arrives on the GTK signal).
+
+### Fixed
+
+- **A `mut` pointer parameter cannot be captured by a closure** in V 0.5.2:
+  the generated C types the captured field as a pointer to the pointer and
+  gcc rejects it. The workaround (copy the pointer to a local first) is
+  applied in `tray_backend` and in the `tray` seam install, and the reason is
+  written next to both. See ADR-0017 Notes.
+
+### Not done in this release
+
+- The wave-3 **Linux** run is not verified yet: `examples/services` does not
+  build on Linux at all, and the Linux screenshots are not taken. The state
+  and the exact reproduction live in `tests/e2e_linux/README.md`. Nothing in
+  this release claims a Linux proof it does not have — see `[Unreleased]`
+  above, where the build and the run are fixed and the remaining gaps are
+  named.
 
 ## [0.3.0] - 2026-09-27
 
@@ -100,17 +624,6 @@ Linux side, all of them now covered by a build or an E2E run:
   GTK clipboard read; both now use `cstring_to_vstring`.
 - `dialog_test.v` called a **Windows-only helper**, which is why `v test .`
   had never run on Linux.
-
-## [Unreleased]
-
-- Planned frontend track (Vite + web frameworks, ADR-0016): type-safe
-  bindings generated from V handler structs and injected into the
-  frontend (`vails-bindings.d.ts` + `vails-client.ts`), JS/V helpers
-  replacing the repetitive `call(method, "")` / manual `json.encode` /
-  untyped `onEvent` boilerplate, and `gen-bindings` / `init --template
-  vite-vanilla-ts|vite-vue` / `run --dev` / dist-embedding `build`
-  wiring. Ordered F0→F4 after Phase 5 S1 wave 3 + Phase 5b, before
-  Phase 7; no code yet, ROADMAP track only.
 
 ## [0.2.0] - 2026-09-27
 

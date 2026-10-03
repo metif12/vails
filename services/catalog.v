@@ -14,14 +14,17 @@ module services
 // OS-agnostic: a manifest describes a service's contract, not its
 // platform support, so the same list is valid on every OS.
 pub fn manifests() []Service {
-	// Phase 5 S1 wave 1 (ADR-0014) then wave 2 (ADR-0015). The catalog order
-	// is the order the .d.ts blocks and the JS snippets are emitted in, and
-	// it follows the catalog order ADR-0014 recorded (dialog → notification →
-	// menu → tray → clipboard → opener → os-info) minus the two services that
-	// still need a window-proc seam (menu, tray).
+	// Phase 5 S1 wave 1 (ADR-0014) then wave 2 (ADR-0015) then wave 3
+	// (ADR-0017). The catalog order is the order the .d.ts blocks and the JS
+	// snippets are emitted in, and it follows the catalog order ADR-0014
+	// recorded (dialog → notification → menu → tray → clipboard → opener →
+	// os-info) with the two services that needed the window host seam - menu
+	// and tray - moved in where that order has them, after notification.
 	return [
 		dialog_manifest(),
 		notification_manifest(),
+		menu_manifest(),
+		tray_manifest(),
 		clipboard_manifest(),
 		opener_manifest(),
 		os_info_manifest(),
