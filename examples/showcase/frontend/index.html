@@ -291,6 +291,25 @@ function paint(key, verdict, text) {
   p.out.textContent = text;
   p.out.className = VERDICT_CLASS[verdict] || "";
   tally();
+  // In verify mode every verdict also crosses into text, because a PNG is not a
+  // verdict: nobody can diff a screenshot for "the clipboard panel passed".
+  // The page is the only side that knows what happened, so this is the channel.
+  if (window.showcase && window.showcase.verify) {
+    report_verdict(key, verdict, text);
+  }
+}
+
+// report_verdict sends one verdict to `demo.verdict`. Failures are swallowed on
+// purpose: a report channel that could break a panel would turn "the framework
+// works" into "the reporting works", which is the wrong thing to be testing.
+function report_verdict(key, verdict, text) {
+  try {
+    window.vails.call("demo.verdict", JSON.stringify({
+      panel: key,
+      verdict: verdict,
+      detail: text
+    })).catch(function () {});
+  } catch (_) { /* reporting is not allowed to break a panel */ }
 }
 
 // tally counts every verdict, including the ones that are not failures, because
@@ -585,6 +604,10 @@ const ready = new Promise((resolve) => { readySettle = resolve; });
 window.showcase = {
   run: run,
   ready: ready,
+  // verify is set by the injected script when a verify run asks for machine
+  // output, and is false on every normal launch — so `paint` reporting a verdict
+  // is opt-in and cannot happen by accident in front of a human.
+  verify: false,
   // The panel list, so the capture script and this page cannot disagree about
   // what a panel is called.
   panels: Object.keys(panels),

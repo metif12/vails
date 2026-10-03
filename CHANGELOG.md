@@ -18,6 +18,21 @@ Conventions for this file:
 
 ## [Unreleased]
 
+### Added
+
+- **`VAILS_SHOWCASE_VERIFY=1` makes the showcase report as text and an exit code**
+  (ADR-0037, ROADMAP R4). It runs every panel a machine can complete and prints
+  each verdict as it happens, because **a PNG is not a verdict** — nobody can diff
+  a screenshot for "the clipboard panel passed". The process exits non-zero on any
+  `FAIL`, and also on "almost nothing reported", since a run that exits 0 because
+  nothing ran is the failure mode that matters most here. `NEEDS YOU` and
+  `NOWHERE` do **not** fail a run: a Linux box with no `drop` backend is not a
+  broken box.
+- **`demo.verdict` / `demo.finish`** — the channel a verify run reports through.
+  The page owns each verdict (V cannot read the DOM) and this is how one becomes
+  text. Both are unset on a normal launch: no probe modes, no injected script, and
+  no auto-answer shim, exactly as ADR-0037 requires.
+
 ### Changed
 
 - **`v test .` and `vails build` need no `-ldflags`/`-cflags` on current V**

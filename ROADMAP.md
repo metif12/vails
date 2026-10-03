@@ -1044,11 +1044,27 @@ a small platform nicety, or a non-goal with a reason attached.
     than observed, and R4 is what turns panels into screenshots. `multiwindow` is
     deliberately absent: it needs two windows, and a panel in a one-window window
     would be a lie by omission.
-- [ ] **R4 — move the E2E burden** off `examples/services` and fold in the U
-  and W proofs, one screenshot per panel, using the existing
-  `capture.ps1` / `run_services.sh` machinery including the per-probe
-  filename that stops one run from erasing another's proof. A panel that
-  cannot produce a screenshot is not a panel yet.
+- [ ] **R4 — the machine-checkable half is DONE; the screenshots are not.**
+  One screenshot per panel is still outstanding, and it is blocked on something
+  that is now named rather than mysterious: `tests/e2e_windows/capture.vsh`
+  compiles, returns correct exit codes and **prints nothing at all**
+  (tests/e2e_windows/README.md opens with that, and with the four theories
+  already ruled out). `capture.ps1` still works, so the capture path is not lost.
+  - **What landed instead, and it is better than the screenshot it replaces for
+    checking**: `VAILS_SHOWCASE_VERIFY=1` runs every machine-checkable panel and
+    reports each verdict **as text**, with a process exit code (ADR-0037's
+    amendment). A PNG cannot be diffed for "the clipboard panel passed"; a line of
+    text can, and it can be pasted into a changelog or asserted by a script. The
+    exit code is 1 on any `FAIL` **and** on "almost nothing reported", because a
+    run that exits 0 because nothing ran is the failure mode that matters. It also
+    needs no GDI, so it is not downstream of the broken capture path.
+  - **Not proven: any of it at runtime.** No verify run has happened, because
+    that means launching the window on this machine, which is the thing that has
+    been crashing the host. The next step is one command and one screenshot of the
+    output: `$env:VAILS_SHOWCASE_VERIFY = "1"; .\showcase.exe`.
+  - **The report logic is not unit-tested**, because it lives in `examples/` and
+    `v test .` does not reach examples. Moving it into a framework module would
+    be the wrong home for logic only this app uses; the verify run is its test.
 
 Order: F0 → F1 → R3 → R4, after Phase 5b. **F0 reopens a decision ADR-0020
 made** — that ADR rejected a framework-owned updater window because building

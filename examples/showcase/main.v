@@ -43,8 +43,10 @@ module main
 
 import bridge
 import config
+import json2
 import os
 import services
+import time
 import webview
 
 // CtxHolder is the app's handle on its window. Services are installed in
@@ -64,6 +66,9 @@ mut:
 	// stays nil if the install failed — the panel then says so instead of
 	// offering a Remove button for an icon that is not there.
 	tray &services.TrayState
+	// verdicts accumulate what the page reported, one entry per panel. Read by
+	// `report` when a verify run finishes, and ignored on a normal run.
+	verdicts []Verdict
 }
 
 fn load_app_config() !config.VailsConfig {
@@ -254,6 +259,158 @@ fn automation_script(panel string) string {
 		'});'
 }
 
+// Verdict is one panel's result, as the page reported it.
+//
+// The page is the only thing that knows what a panel did — V cannot read the DOM
+// — so `demo.verdict` is how a verdict crosses into text. That is the whole of
+// R4's machine-checkable half, and it exists because a PNG is not a verdict: a
+// screenshot cannot be diffed for "the clipboard panel passed", so the same
+// information is also emitted as a line a person reads and a script can assert.
+struct Verdict {
+pub mut:
+	panel   string
+	verdict string
+	detail  string
+}
+
+// record_verdict appends one panel's result and echoes it immediately.
+//
+// Echoing as it arrives rather than at the end is deliberate: a verify run that
+// prints nothing for six seconds and then dumps a table is indistinguishable from
+// one that hung, and the whole run is a sequence of native calls that can each
+// fail. One line per panel as it happens is also the shape a transcript wants.
+fn record_verdict(mut holder &CtxHolder, panel string, verdict string, detail string) {
+	holder.verdicts << Verdict{
+		panel:   panel
+		verdict: verdict
+		detail:  detail
+	}
+	println('  ' + pad(panel, 11) + pad(verdict, 11) + detail)
+}
+
+// report prints the tally and returns the process exit code.
+//
+// **The exit code is the point.** `NEEDS YOU` and `NOWHERE` are honest answers
+// and do NOT fail the run — a Linux box with no `drop` backend is not a broken
+// box. Only `FAIL` is, so a verify run can gate something. Reporting the counts
+// as well as the code is what keeps the code from being the only thing that
+// matters: a run that exits 0 because nothing ran is the failure mode here.
+fn report(holder &CtxHolder) int {
+	mut counts := map[string]int{}
+	mut unrun := 0
+	for v in holder.verdicts {
+		counts[v.verdict]++
+	}
+	println('')
+	println('showcase: ' + counts['PASS'].str() + ' pass, ' +
+		counts['NEEDS YOU'].str() + ' need a human, ' + counts['NOWHERE'].str() +
+		' not on this platform, ' + counts['FAIL'].str() + ' fail, ' +
+		unrun.str() + ' of ' + expected_panels.str() + ' panels reported')
+	if counts['FAIL'] > 0 {
+		return 1
+	}
+	if holder.verdicts.len < 2 {
+		eprintln('showcase: almost nothing reported - treat this as a failed run, ' +
+			'not as a clean one')
+		return 1
+	}
+	return 0
+}
+
+// expected_panels is how many panels the page has, which is what makes "only two
+// reported" a failure rather than a quiet success.
+const expected_panels = 11
+
+// pad right-pads to `n` so the report lines up. Two spaces of slack, because a
+// verdict longer than the column would silently run the next column together and
+// a report that runs together is a report nobody reads.
+fn pad(s string, n int) string {
+	mut out := s
+	for out.len < n {
+		out += ' '
+	}
+	return out + '  '
+}
+
+// close_after asks the window to close, `ms` from now, on another thread.
+//
+// The delay is the whole function. See `demo.finish`: the caller is on the window
+// thread inside a message handler, and the close has to happen after that handler
+// has returned.
+fn close_after(ctx webview.Ctx, ms int) {
+	time.sleep(ms * time.millisecond)
+	ctx.close() or {
+		eprintln('showcase: could not close the window: ' + err.msg())
+	}
+}
+
+// VerdictParams is `demo.verdict`'s wire shape. `pub mut` because json2 fills
+// it, and named rather than a map so the contract is readable in the code.
+struct VerdictParams {
+pub mut:
+	panel   string
+	verdict string
+	detail  string
+}
+
+// parse_verdict decodes demo.verdict's params.
+//
+// The verdict is **not** validated against a closed set here, deliberately: the
+// page is the authority on what a panel concluded, and this side's job is to
+// print it faithfully. Validating it would mean a new verdict in the page
+// silently vanishing from the report instead of appearing in it, which is the
+// wrong direction for a diagnostic. What IS checked is the two things that would
+// make the report unreadable: an empty panel name, and an absurd detail length.
+pub fn parse_verdict(params string) !Verdict {
+	if params == '' || params == 'null' {
+		return error('demo.verdict: no verdict payload')
+	}
+	v := json2.decode[VerdictParams](params) or {
+		return error('demo.verdict: invalid payload: ' + err.msg())
+	}
+	if v.panel == '' {
+		return error('demo.verdict: a verdict needs a panel name')
+	}
+	if v.verdict == '' {
+		return error('demo.verdict: panel "' + v.panel + '" reported no verdict')
+	}
+	if v.detail.len > 2000 {
+		return error('demo.verdict: detail is longer than 2000 characters')
+	}
+	return Verdict{
+		panel:   v.panel
+		verdict: v.verdict
+		detail:  v.detail
+	}
+}
+
+// verify_script is what a verify run injects instead of a single panel.
+//
+// It is the same seam as `automation_script` (ADR-0037): set the flag, then use
+// the page's own `run` for every panel a machine can complete. The flag has to be
+// set BEFORE the panels run and AFTER the page's script has loaded, which is why
+// it is injected before `</body>` rather than in `<head>`: at that point
+// `window.showcase` exists but nothing has been run yet.
+//
+// The two human-only panels are deliberately not in AUTO — a file picker and a
+// tray right-click have no machine answer, and asking for one is how a verify run
+// hangs forever. They stay IDLE and the report says so, which is the honest
+// outcome rather than a timeout.
+fn verify_script() string {
+	return 'window.showcase.verify = true;' + '\n' +
+		'window.showcase.ready.then(function () {' + '\n' +
+		'  var auto = ["bridge", "caps", "osinfo", "clipboard", "notify", ' +
+		'"opener", "menubar", "post"];' + '\n' +
+		'  var chain = Promise.resolve();' + '\n' +
+		'  auto.forEach(function (k) { chain = chain.then(function () {' + '\n' +
+		'    return window.showcase.run(k);' + '\n' +
+		'  }); });' + '\n' +
+		'  chain.then(function () {' + '\n' +
+		'    return window.vails.call("demo.finish", "");' + '\n' +
+		'  }).catch(function () {});' + '\n' +
+		'});'
+}
+
 fn main() {
 	app_cfg := load_app_config() or {
 		eprintln(err.msg())
@@ -264,10 +421,17 @@ fn main() {
 		exit(1)
 	}
 	// The automation seam, and only when somebody asked for one: R4's capture
-	// script sets this to isolate a panel per screenshot. It travels with the
+	// script sets this to isolate a panel per screenshot, and a verify run sets it
+	// to run every machine-checkable panel and report. It travels with the
 	// document so the page runs it through the real JS path rather than a
 	// synthesised click, exactly as the services probe does.
-	automation := automation_script(os.getenv('VAILS_SHOWCASE_PANEL'))
+	verify := os.getenv('VAILS_SHOWCASE_VERIFY') != ''
+	mut automation := automation_script(os.getenv('VAILS_SHOWCASE_PANEL'))
+	if verify {
+		// Verify wins over a single panel: asking for both is a contradiction and
+		// the honest reading of it is "run everything", which is a superset.
+		automation = verify_script()
+	}
 	if automation != '' {
 		html = inject_before_body(html, automation)
 	}
@@ -309,6 +473,43 @@ fn main() {
 		return support
 	}) or {
 		eprintln('demo.support: ' + err.msg())
+		exit(1)
+	}
+	// The verdict channel (R4). The page owns the verdict — it is the only side
+	// that can see what a panel did — so this is how one becomes text.
+	//
+	// Not capability-gated in the manifest sense: it is in the `bridge`
+	// capability's command list, so a page that has not been granted it gets
+	// refused, exactly like every other command.
+	router.register('demo.verdict', fn [mut holder] (params string) !string {
+		v := parse_verdict(params) or {
+			return error(bridge.err_bad_params(err.msg()))
+		}
+		record_verdict(mut holder, v.panel, v.verdict, v.detail)
+		return ''
+	}) or {
+		eprintln('demo.verdict: ' + err.msg())
+		exit(1)
+	}
+	// `demo.finish` is how a verify run ends. The page cannot close its own window
+	// — only the app knows how — and it must not try: from JS both options are
+	// wrong (reloading loops forever, `window.close()` does nothing in a webview).
+	router.register('demo.finish', fn [mut holder] (_ string) !string {
+		// Spawned rather than closed inline, because this handler runs ON the
+		// window thread inside the very message loop that has to return before the
+		// window can close. Closing from here asks the library to shut down the
+		// loop it is currently dispatching into. The short sleep on another thread
+		// lets this handler return first — a plain reference, because `spawn` with
+		// a `mut ... &T` crashes or hangs in this V (AGENTS.md §2c).
+		//
+		// `mut closer := holder` rather than capturing `holder`: a `mut` capture
+		// of a `mut` *parameter* is typed as a pointer to the pointer by V 0.5.2
+		// and gcc rejects the assignment — a plain local captures correctly.
+		mut closer := holder
+		spawn close_after(closer.ctx, 250)
+		return ''
+	}) or {
+		eprintln('demo.finish: ' + err.msg())
 		exit(1)
 	}
 	// Services need the window handle, which only exists once the native window
@@ -364,5 +565,11 @@ fn main() {
 	}) or {
 		eprintln('showcase: ' + err.msg())
 		exit(1)
+	}
+	// The report, after the window has closed. On a normal run `verdicts` is empty
+	// and this prints nothing that says anything — so it only speaks when a
+	// verify run asked for it, because a report nobody asked for is noise.
+	if verify {
+		exit(report(holder))
 	}
 }

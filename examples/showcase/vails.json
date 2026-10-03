@@ -14,7 +14,7 @@
 		{
 			"id": "bridge",
 			"windows": ["main"],
-			"commands": ["demo.ping", "demo.post", "demo.support"],
+			"commands": ["demo.ping", "demo.post", "demo.support", "demo.verdict", "demo.finish"],
 			"asset_roots": ["frontend"],
 			"platforms": []
 		},
