@@ -45,9 +45,16 @@ code in this repo should read §2c before it is written.
 The repo's own rule (AGENTS.md §5) is that a line either names a proof or says it
 is unproven. The four things most likely to be over-read:
 
-- **B2+B3 (Dockerfile + CI) is written but never executed.** No runner and no
-  container on this machine, so "the CI is green" is not a claim anyone can make
-  yet.
+- **B2+B3 (Dockerfile + CI): the CI has now been RUN once, and it is fixed but
+  still unproven.** The "never executed" claim was true until 2026-10-03, when it
+  was executed on GitHub and reported **"No jobs were run"** — one step had lost
+  its indentation, so the workflow was invalid YAML and GitHub had no jobs to
+  run. Fixed, and `buildplan/workflow_test.v` now guards it (the guard was
+  confirmed **red on the broken file and green on the fixed one**, which is the
+  only way to know a guard guards). The runner has still never reported a single
+  green job, so "CI is green" remains a claim nobody can make: the first real run
+  may well stop at the `json2` smoke step, which exists precisely to turn a
+  confusing failure into a named one.
 - **The Linux GUI proofs need a real session.** `menu.png` / `tray.png` /
   `dialog.png` exist; the Linux `menu:clicked {id}` mapping does not, because Xvfb
   has no window manager to deliver the click.

@@ -111,7 +111,7 @@ jobs:
         # affects subsequent steps, which is exactly the scope wanted.
         run: "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-- name: v test .
+      - name: v test .
         # The `-ldflags` is not optional **on V 0.5.2**, which is what the winget
         # step above installs, and the reason is a V bug rather than a repo one:
         # V 0.5.2's `dependency_scan_fallback` link path emits `#flag`-sourced
