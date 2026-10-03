@@ -11,7 +11,8 @@ an ADR, not here.
 
 | | |
 |---|---|
-| `v test .` on Windows | **38/38** (`v -cc gcc -ldflags "-lws2_32" test .` — AGENTS.md §1) |
+| `v test .` on Windows | **33/33 test files green**, excluding `webview` (below). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1c |
+| `v test webview` on Windows | **cannot be run**: it takes the host down. Measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with **no OOM in the Windows event log**. All six `webview` test files *compile* (`v -o`, no run). |
 | `v test .` on Linux | 32/32 as of 2026-09-28. **Stale**: not re-measured since ADR-0034/0035, and this repo does not have a Linux runner. Treat as "was green", not "is green". |
 | Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
 | Next by the table | **F0's proof run** (one command: `examples/multiwindow`), then F1, then W1–W4 |
@@ -969,29 +970,77 @@ a small platform nicety, or a non-goal with a reason attached.
     landing this: **`jsesc.escape` does not escape `"`**, so a window label
     wrapped in double quotes was a script injection into every page — the label
     is now single-quoted and there are three escaping tests.
-- [ ] **F1 — drag & drop**, the other row. Wails ships `drag-n-drop`, Tauri
-  ships `drag`, Vails has nothing, and for any app whose user has files on
-  disk a window that will not accept a dropped file is a prototype. A `drop`
-  service reports that a drop happened and what it carried; the page decides
-  what to do — the same reasoning that made `opener` a capability-gated
-  service with a scheme allowlist (ADR-0015), because the OS is being asked to
-  act on something a page supplied. **The first thing to check is whether
-  `EnableWebDrop` is reachable at all**: it is a WebView2 *host* setting, not
-  on the `webview` 0.12 surface, so it may have to go through
-  `WM_DROPFILES` / `IDropTarget` on the HWND instead. A service with no
-  reachable native implementation is worse than no service, because the
-  manifest would promise it. Depends on F0 — "drop onto which window" is a
-  routing question.
-- [ ] **R3 — `examples/showcase`**: one multi-panel app, one panel per
-  capability, each with a button, a status line and a **machine-checkable**
-  result — the convention ADR-0014's clipboard round trip established. It
-  **replaces `examples/services` as the E2E vehicle** rather than joining it;
-  that example has outgrown its role by becoming five probe modes behind
-  `VAILS_SERVICES_PROBE`, and two vehicles is how `services.png` and
-  `notification.png` once ended up byte-identical. A panel for a service that
-  is a stub on this platform shows the platform's honest answer and never a
-  fake (ADR-0018's discipline). The showcase is a **reference, not a
+- [ ] **F1 — drag & drop**, the other row, and the `drop` service (ADR-0036,
+  landed 2026-10-03): Wails ships `drag-n-drop`, Tauri ships `drag`, Vails had
+  nothing, and for any app whose user has files on disk a window that will not
+  accept a dropped file is a prototype. A `drop` service reports that a drop
+  happened and what it carried; the page decides what to do — the same reasoning
+  that made `opener` a capability-gated service with a scheme allowlist
+  (ADR-0015), because the OS is being asked to act on something a page supplied.
+  **The gating question is answered, and the answer decided the design**:
+  `EnableWebDrop` is **not reachable**. The installed `webview` 0.12 header
+  declares sixteen `WEBVIEW_API` functions and not one is about dropping,
+  because `EnableWebDrop` is a WebView2 *host* setting on `ICoreWebView2Controller`
+  and the library does not expose the controller. What is left is `WM_DROPFILES`
+  on the HWND, which is a window message, which is what `webview/host.v` already
+  delivers — so the seam is the mechanism, not an obstacle.
+  - **The routing question F0 was blocking is answered by the seam itself** — it
+    is per-window and each hook closes over that window's own `Ctx`, so a drop is
+    reported to the page it landed on, with no new routing and no global "current
+    window" to be ambiguous about. `drop.enable` / `drop.disable`, both
+    capability-gated, neither taking params; one `drop:files` event carrying
+    `{"paths":[…],"count":n}`.
+  - **18 pure-V tests green on both platforms** — the bounds (64 paths, 1024
+    chars, NUL rejected rather than truncated), the truncation order, the empty
+    report, the payload round trip, and that a message which is not
+    `WM_DROPFILES` is passed on even when its lParam would have looked like a
+    handle.
+  - **The price is stated rather than hidden: the page does NOT get the DOM's
+    `dragover` / `drop`.** `DragAcceptFiles` on the top-level window takes the
+    drop from WebView2's child, and there is no reachable alternative. The
+    `vails doctor` line for `drop` carries this, because a service reporting
+    only "ok" would be exactly the over-read this file's own rules forbid.
+  - **Paths, never contents.** A page that wants a file's bytes has to be given
+    a way to ask; that capability should be granted on its own rather than
+    inherited by every window that can receive a drop.
+  - **Linux is unwritten on purpose** (AGENTS.md §3.4, ADR-0015's lesson: no
+    native code that has never been compiled, and there is no Linux runner
+    here). Everything that is not native is done and tested; the gap is a
+    `GtkDropTarget` and one function. `doctor` says "unwritten", not
+    "unsupported", because only one of those is true.
+  - **Still unchecked, and for the same reason as F0**: nothing has seen a human
+    drag a file, because the Windows GUI proofs go through the `webview` module
+    that crashes this host. The outstanding run is the six-step procedure in
+    `tests/e2e_windows/README.md`; `examples/services` has no drop panel yet, so
+    it is console calls until R4 gives every panel a screenshot.
+- [ ] **R3 — `examples/showcase`** (ADR-0037, app written 2026-10-03): one
+  multi-panel app, one panel per capability, each with a button, a status line and
+  a **machine-checkable** verdict — the convention ADR-0014's clipboard round trip
+  established, made into a badge. It **replaces `examples/services` as the E2E
+  vehicle** rather than joining it; that example has outgrown its role by becoming
+  seven probe modes behind `VAILS_SERVICES_PROBE`, and two vehicles is how
+  `services.png` and `notification.png` once ended up byte-identical. A panel for a
+  service that is a stub on this platform shows the platform's honest answer and
+  never a fake (ADR-0018's discipline). The showcase is a **reference, not a
   template** — `vails init` keeps scaffolding the small `hello` app.
+  - **The verdict vocabulary is the design**: `PASS` (exercised and *checked*),
+    `NEEDS YOU` (works, only a human can finish it), `NOWHERE` (this build has no
+    backend, said by `services.supports()` — never guessed from an error string),
+    `FAIL`. A sticky tally counts all four, so one screenshot is a verdict on the
+    whole framework.
+  - **Two panels are inverted on purpose**, because their failure mode is
+    silence: the capability gate and the opener's scheme allowlist **pass when the
+    call is refused**.
+  - **No probe modes and no auto-answer shim** — the dialog panel blocks the
+    window and says `NEEDS YOU` while it does, which is also why a screenshot can
+    never come out green by accident.
+  - Verified: it builds, `vails doctor` reports `ok (1 window(s), 10
+    capabilit(ies))` with all eight services, and the generated `.d.ts` carries
+    the `drop` namespace with `DropFiles`. **Not verified: the page running** —
+    no browser has executed this HTML, so the verdict logic is reviewed rather
+    than observed, and R4 is what turns panels into screenshots. `multiwindow` is
+    deliberately absent: it needs two windows, and a panel in a one-window window
+    would be a lie by omission.
 - [ ] **R4 — move the E2E burden** off `examples/services` and fold in the U
   and W proofs, one screenshot per panel, using the existing
   `capture.ps1` / `run_services.sh` machinery including the per-probe

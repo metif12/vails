@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vails Showcase</title>
+<style>
+  /* One stylesheet, no framework: this page is a reference for what the
+     *framework* does, and a build step or a CSS framework in it would make the
+     example a worse starting point than examples/hello. */
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --line: #262b36;
+    --ink: #e6e9ef;
+    --dim: #98a0b0;
+    --pass: #3fb950;
+    --fail: #f85149;
+    --you: #d29922;
+    --none: #6e7681;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+  }
+  /* The summary strip is sticky because it is the one thing a screenshot has to
+     contain: the counts. Everything else on the page is evidence for them. */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 12px 20px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+  #tally { color: var(--dim); font-variant-numeric: tabular-nums; }
+  #tally b { color: var(--ink); font-weight: 600; }
+  .spacer { flex: 1; }
+  button {
+    font: inherit;
+    color: var(--ink);
+    background: #20242e;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 11px;
+    cursor: pointer;
+  }
+  button:hover { border-color: #3a4152; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  main {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 12px 20px 24px;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .head { display: flex; align-items: center; gap: 8px; }
+  h2 { font-size: 13px; margin: 0; font-weight: 600; }
+  /* The badge is the machine-checkable part: four words, never a colour alone,
+     because a screenshot in greyscale still has to say PASS from FAIL. */
+  .badge {
+    margin-left: auto;
+    font-size: 10px;
+    letter-spacing: .08em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--none);
+    color: var(--none);
+    white-space: nowrap;
+  }
+  .badge.pass { color: var(--pass); border-color: var(--pass); }
+  .badge.fail { color: var(--fail); border-color: var(--fail); }
+  .badge.you { color: var(--you); border-color: var(--you); }
+  .badge.none { color: var(--none); border-color: var(--none); }
+  p.why { margin: 0; color: var(--dim); font-size: 12px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  input[type=text] {
+    font: inherit;
+    color: var(--ink);
+    background: #0c0e13;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 8px;
+    min-width: 0;
+    flex: 1;
+  }
+  output {
+    display: block;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--dim);
+    min-height: 2.6em;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  output.pass { color: var(--pass); }
+  output.fail { color: var(--fail); }
+  output.you { color: var(--you); }
+  .note { color: var(--none); font-size: 11px; }
+  dl.facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 11.5px; }
+  dl.facts dt { color: var(--dim); }
+  dl.facts dd { margin: 0; font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vails Showcase</h1>
+  <span id="tally">reading platform support&hellip;</span>
+  <span class="spacer"></span>
+  <button id="run-all" type="button" disabled>Run everything checkable</button>
+</header>
+<main>
+
+  <section id="p-bridge" data-service="">
+    <div class="head"><h2>Bridge</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">A JS &rarr; V &rarr; JS round trip. The panel asserts on the
+      <em>value</em> that comes back, not merely on a resolved promise.</p>
+    <div class="row"><button class="primary" data-run="bridge">Ping</button></div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-post" data-service="">
+    <div class="head"><h2>Main-thread post (U0)</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">A spawned worker hands a closure back to the window thread,
+      which emits. Arriving at all is the proof &mdash; a worker calling
+      <code>ctx.emit</code> directly would be off the owning thread.</p>
+    <div class="row"><button class="primary" data-run="post">Post from a worker</button></div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-caps" data-service="">
+    <div class="head"><h2>Capability gate</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">A command the manifest does not grant. The panel
+      <em>passes when the call is refused</em> &mdash; a rejection here is the
+      security property working, so a resolved promise would be the failure.</p>
+    <div class="row"><button class="primary" data-run="caps">Call an ungranted command</button></div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-osinfo" data-service="os_info">
+    <div class="head"><h2>Host info</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">Pure V on both platforms, so this panel is a check that the
+      service is wired rather than a check of the OS.</p>
+    <div class="row"><button class="primary" data-run="osinfo">Read host info</button></div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-clipboard" data-service="clipboard">
+    <div class="head"><h2>Clipboard</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">Write, then read back, then compare &mdash; the convention
+      ADR-0014 established for a machine-checkable service result.</p>
+    <div class="row">
+      <input type="text" id="clip-text" value="vails showcase clipboard proof" />
+      <button class="primary" data-run="clipboard">Round trip</button>
+    </div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-notify" data-service="notification">
+    <div class="head"><h2>Notification</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">A real toast on Windows (WinRT) and a tray balloon on Linux.
+      The command returns which mechanism actually ran.</p>
+    <div class="row"><button class="primary" data-run="notify">Notify</button></div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-opener" data-service="opener">
+    <div class="head"><h2>Opener allowlist</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">The checkable half is a <em>refusal</em>: a granted
+      <code>opener</code> must not become a way to launch
+      <code>file://</code>. Opening a real URL needs a browser you are watching.</p>
+    <div class="row">
+      <input type="text" id="blocked-url" value="file:///C:/Windows/win.ini" />
+      <button class="primary" data-run="opener">Try it anyway</button>
+    </div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-menu" data-service="menu">
+    <div class="head"><h2>Menu</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">A popup menu is a modal loop with a human in it, so the
+      window menu bar is the checkable half &mdash; it installs on the window and
+      the choice comes back as <code>menu:clicked</code>.</p>
+    <div class="row">
+      <button class="primary" data-run="menubar">Install the window menu bar</button>
+      <button data-run="popup">Open a popup</button>
+    </div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-dialog" data-service="dialog">
+    <div class="head"><h2>Dialog</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">A file picker is the service working. It also
+      <em>blocks this window</em> until you answer &mdash; that is the platform's
+      modal call, not a Vails choice, and it is why this panel never claims PASS
+      on its own.</p>
+    <div class="row">
+      <button class="primary" data-run="dialog-open">Open&hellip;</button>
+      <button data-run="dialog-message">Message box</button>
+    </div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-tray" data-service="tray">
+    <div class="head"><h2>Tray</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">Installs a real icon and a real menu. Verdict NEEDS YOU
+      because the click that proves it happens in the notification area, not in
+      this window.</p>
+    <div class="row">
+      <button class="primary" data-run="tray">Install icon + menu</button>
+      <button data-run="tray-remove">Remove it</button>
+    </div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-drop" data-service="drop">
+    <div class="head"><h2>Drag &amp; drop</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">Arms the window, then waits for a human to drag a file onto it.
+      The page gets <code>drop:files</code> and <em>not</em> the DOM's
+      <code>drop</code> event &mdash; that is the price of the only reachable
+      native path (ADR-0036).</p>
+    <div class="row">
+      <button class="primary" data-run="drop">Accept drops</button>
+      <button data-run="drop-off">Stop</button>
+    </div>
+    <output data-status></output>
+  </section>
+
+</main>
+
+<script>
+"use strict";
+
+// ## The three verdicts, and why there are exactly these
+//
+// PASS      the capability was exercised and the result was checked
+// NEEDS YOU it works, but only a human can complete it (a drag, a right-click
+//           in the tray, a file picker) — claiming PASS here would be a fake
+//           proof, and ADR-0018's discipline is exactly that
+// NOWHERE    this build has no backend for it, said by the framework's own
+//           support table rather than guessed from an error string
+//
+// FAIL is the fourth and it is the only one that means something broke.
+//
+// ## The page does not decide what is supported
+//
+// `demo.support` hands over services.supports() — the same table `vails doctor`
+// prints. A panel whose service is not ready shows NOWHERE with the framework's
+// own note and never calls the command, so the page cannot report a working
+// feature as broken or a missing one as working.
+
+const VERDICT_CLASS = { PASS: "pass", FAIL: "fail", "NEEDS YOU": "you", NOWHERE: "none", IDLE: "" };
+
+const panels = {};
+document.querySelectorAll("section").forEach((el) => {
+  panels[el.id.replace(/^p-/, "")] = {
+    el,
+    badge: el.querySelector("[data-badge]"),
+    out: el.querySelector("[data-status]"),
+    service: el.getAttribute("data-service") || "",
+    verdict: "IDLE",
+  };
+});
+
+let supports = {};
+let tallyEl = document.getElementById("tally");
+
+function paint(key, verdict, text) {
+  const p = panels[key];
+  if (!p) return;
+  p.verdict = verdict;
+  p.badge.textContent = verdict;
+  p.badge.className = "badge " + (VERDICT_CLASS[verdict] || "");
+  p.out.textContent = text;
+  p.out.className = VERDICT_CLASS[verdict] || "";
+  tally();
+}
+
+// tally counts every verdict, including the ones that are not failures, because
+// "6 pass, 3 need a human, 1 nowhere, 0 fail" is a different statement from
+// "10 panels" and only the first one is a verdict. This line is the single thing
+// a screenshot has to contain.
+function tally() {
+  const counts = { PASS: 0, "NEEDS YOU": 0, FAIL: 0, NOWHERE: 0, IDLE: 0 };
+  Object.values(panels).forEach((p) => { counts[p.verdict] += 1; });
+  tallyEl.innerHTML =
+    "<b>" + counts.PASS + "</b> pass &middot; <b>" + counts["NEEDS YOU"] +
+    "</b> need a human &middot; <b>" + counts.NOWHERE + "</b> not on this platform" +
+    " &middot; <b>" + counts.FAIL + "</b> fail &middot; <b>" + counts.IDLE + "</b> not run";
+}
+
+// gate reports the framework's verdict for a panel's service, or null when the
+// service is ready (or the panel is not about a service at all).
+function gate(key) {
+  const p = panels[key];
+  if (!p || !p.service) return null;
+  const s = supports[p.service];
+  if (!s || s.ready) return null;
+  paint(key, "NOWHERE", p.service + ": " + s.note);
+  return s;
+}
+
+// call is the one place a Vails promise is made, so every panel reports failures
+// the same way and none of them can swallow one.
+function call(method, params) {
+  return window.vails.call(method, params || "");
+}
+
+// msg unwraps a rejection. The runtime rejects with `new Error(msg.err)`, so
+// `e.message` is the framework's own text — "bad params: opener: scheme ..." —
+// and String(e) would prefix every one of them with "Error: ".
+function msg(e) {
+  return e && e.message ? e.message : String(e);
+}
+
+const RUNNERS = {
+  // The value is asserted, not just the resolution: a round trip that resolves
+  // with the wrong string is a different bug from one that does not resolve, and
+  // only checking the value catches both.
+  bridge() {
+    return call("demo.ping").then((r) => {
+      if (r === "pong:vails") {
+        paint("bridge", "PASS", "demo.ping -> " + r);
+      } else {
+        paint("bridge", "FAIL", "demo.ping returned " + JSON.stringify(r) + ", expected pong:vails");
+      }
+    });
+  },
+
+  // The event is the whole result, so this one waits for it with a timeout
+  // rather than resolving on the command's return: the command returning only
+  // says the worker was spawned.
+  //
+  // There is no unsubscribe in the runtime (`vails` has call / emit / onEvent and
+  // no `off`), so the listener stays registered and the `settled` flag makes
+  // every later delivery a no-op. That is a gap in the runtime rather than in
+  // this page, and a panel that needed to unregister would be the place to
+  // notice it.
+  post() {
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (verdict, text) => {
+        if (settled) return;
+        settled = true;
+        paint("post", verdict, text);
+        resolve();
+      };
+      window.vails.onEvent("demo:posted", (data) => done("PASS", "demo:posted " + JSON.stringify(data)));
+      call("demo.post").catch((e) => done("FAIL", "demo.post refused: " + msg(e)));
+      setTimeout(() => done("FAIL", "demo:posted never arrived within 3s"), 3000);
+    });
+  },
+
+  // Inverted on purpose: the proof is that the call is REFUSED.
+  caps() {
+    return call("app.not_granted").then(
+      () => paint("caps", "FAIL", "app.not_granted was ALLOWED — the gate did not hold"),
+      (e) => paint("caps", "PASS", "refused as expected: " + msg(e))
+    );
+  },
+
+  osinfo() {
+    return call("os_info.get").then((r) => {
+      let facts = {};
+      try { facts = JSON.parse(r); } catch (_) { /* shown below as raw */ }
+      const keys = Object.keys(facts);
+      if (keys.length === 0) {
+        paint("osinfo", "FAIL", "os_info.get returned nothing to show");
+        return;
+      }
+      const dl = document.createElement("dl");
+      dl.className = "facts";
+      keys.forEach((k) => {
+        const dt = document.createElement("dt");
+        dt.textContent = k;
+        const dd = document.createElement("dd");
+        dd.textContent = String(facts[k]);
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+      });
+      const p = panels.osinfo;
+      p.out.textContent = "";
+      p.out.appendChild(dl);
+      p.out.className = VERDICT_CLASS.PASS;
+      p.badge.textContent = "PASS";
+      p.badge.className = "badge pass";
+      p.verdict = "PASS";
+      tally();
+    });
+  },
+
+  // Write, read, compare. Three steps because "write_text returned" is not the
+  // claim; the claim is that the bytes came back.
+  clipboard() {
+    const want = document.getElementById("clip-text").value;
+    return call("clipboard.write_text", JSON.stringify({ text: want }))
+      .then(() => call("clipboard.read_text"))
+      .then((r) => {
+        if (r === want) {
+          paint("clipboard", "PASS", "round trip: " + JSON.stringify(r));
+        } else {
+          paint("clipboard", "FAIL", "read back " + JSON.stringify(r) + ", wrote " + JSON.stringify(want));
+        }
+      });
+  },
+
+  notify() {
+    return call("notification.notify", JSON.stringify({ title: "Vails Showcase", body: "the toast service works" }))
+      .then((r) => paint("notify", "PASS", r ? r + " reported ok" : "notified"));
+  },
+
+  // The refusal IS the pass. A resolved promise here would mean a granted
+  // opener had become a way to launch any scheme.
+  opener() {
+    const url = document.getElementById("blocked-url").value;
+    return call("opener.open_url", JSON.stringify({ url: url })).then(
+      () => paint("opener", "FAIL", url + " was ALLOWED — the allowlist did not hold"),
+      (e) => paint("opener", "PASS", "refused as expected: " + msg(e))
+    );
+  },
+
+  menubar() {
+    const items = {
+      items: [
+        { id: "file", label: "File", items: [{ id: "quit", label: "Quit" }] },
+        { id: "help", label: "Help", items: [{ id: "about", label: "About" }] }
+      ]
+    };
+    return call("menu.set_menu", JSON.stringify(items)).then(
+      () => paint("menu", "PASS", "window menu bar installed — File / Help now open on the window"),
+      (e) => paint("menu", "FAIL", "menu.set_menu refused: " + msg(e))
+    );
+  },
+
+  popup() {
+    paint("menu", "NEEDS YOU", "a popup menu is a modal loop: choose an item, and the choice arrives as menu:clicked");
+    const items = { items: [{ id: "one", label: "First" }, { id: "two", label: "Second" }] };
+    return call("menu.popup", JSON.stringify(items)).catch((e) => paint("menu", "FAIL", "menu.popup refused: " + msg(e)));
+  },
+
+  dialogOpen() {
+    paint("dialog", "NEEDS YOU", "a file picker is open and this window is blocked until you answer — that is the platform's modal call");
+    return call("dialog.open", JSON.stringify({ title: "Pick a file" })).then(
+      (r) => paint("dialog", "PASS", "dialog.open -> " + r),
+      (e) => paint("dialog", "FAIL", "dialog.open failed: " + msg(e))
+    );
+  },
+
+  dialogMessage() {
+    return call("dialog.message", JSON.stringify({ title: "Vails Showcase", message: "A message box.", buttons: ["ok"] }))
+      .then((r) => paint("dialog", "PASS", "dialog.message -> " + r),
+            (e) => paint("dialog", "FAIL", "dialog.message failed: " + msg(e)));
+  },
+
+  tray() {
+    const opts = { icon: "", tooltip: "Vails Showcase" };
+    const items = { items: [{ id: "open", label: "Open" }, { id: "quit", label: "Quit" }] };
+    return call("tray.set", JSON.stringify(opts))
+      .then(() => call("tray.set_menu", JSON.stringify(items)))
+      .then(
+        () => paint("tray", "NEEDS YOU", "icon + menu installed — right-click it in the notification area (a left click must NOT open the menu)"),
+        (e) => paint("tray", "FAIL", "tray.set refused: " + msg(e))
+      );
+  },
+
+  trayRemove() {
+    return call("tray.destroy").then(
+      () => paint("tray", "PASS", "tray icon removed"),
+      (e) => paint("tray", "FAIL", "tray.destroy refused: " + msg(e))
+    );
+  },
+
+  drop() {
+    return call("drop.enable").then(
+      () => paint("drop", "NEEDS YOU", "armed — drag a file (or a folder) onto this window; one drop:files event carries every path"),
+      (e) => paint("drop", "FAIL", "drop.enable refused: " + msg(e))
+    );
+  },
+
+  dropOff() {
+    return call("drop.disable").then(
+      () => paint("drop", "PASS", "drop hook removed from the window"),
+      (e) => paint("drop", "FAIL", "drop.disable refused: " + msg(e))
+    );
+  },
+};
+
+// The OS-initiated events the panels wait for. Each is registered once, and each
+// only speaks for its own panel — the same discipline window.v's emit_to exists
+// to enforce (ADR-0035): an event addressed to one panel must never update
+// another one's status line.
+window.vails.onEvent("drop:files", (data) => {
+  let n = 0;
+  let paths = [];
+  try {
+    const d = JSON.parse(data);
+    paths = d.paths || [];
+    n = d.count === undefined ? paths.length : d.count;
+  } catch (_) { /* shown raw below */ }
+  const list = paths.slice(0, 3).join("\n  ") + (paths.length > 3 ? "\n  ... " + (paths.length - 3) + " more" : "");
+  paint("drop", "NEEDS YOU", "drop:files count=" + n + "\n  " + list);
+});
+
+window.vails.onEvent("menu:clicked", (data) => {
+  paint("menu", "PASS", "menu:clicked " + JSON.stringify(data) + " — the choice came back through the window");
+});
+
+window.vails.onEvent("tray:clicked", (data) => {
+  paint("tray", "PASS", "tray:clicked " + JSON.stringify(data));
+});
+
+// run dispatches one panel, after the support gate. The gate is asked BEFORE the
+// command so a missing backend is reported as a platform fact and not as a
+// command failure.
+function run(key) {
+  if (gate(key)) return Promise.resolve();
+  const fn = RUNNERS[key];
+  if (!fn) return Promise.resolve();
+  paint(key, "IDLE", "running...");
+  return Promise.resolve(fn()).catch((e) => paint(key, "FAIL", msg(e)));
+}
+
+document.querySelectorAll("[data-run]").forEach((btn) => {
+  btn.addEventListener("click", () => run(btn.getAttribute("data-run")));
+});
+
+// "Run everything checkable" runs the panels a machine can complete on its own
+// and leaves the human ones IDLE, so the tally after one click is a statement
+// about the framework rather than about which buttons somebody pressed. The
+// order is deliberate: the capability gate first, because it is the cheapest
+// proof that dispatch is working at all, and a later panel failing for that
+// reason would be noise.
+const AUTO = ["bridge", "caps", "osinfo", "clipboard", "notify", "opener", "menubar", "post"];
+
+document.getElementById("run-all").addEventListener("click", async () => {
+  const btn = document.getElementById("run-all");
+  btn.disabled = true;
+  for (const key of AUTO) {
+    btn.textContent = "running " + key + "...";
+    await run(key);
+  }
+  btn.textContent = "Run everything checkable";
+  btn.disabled = false;
+});
+
+// The platform's own answers, fetched once. Until they arrive the buttons stay
+// disabled: a panel that ran before it knew what this platform supports could
+// only report a guess.
+//
+// `ready` is that fetch, as a promise, and it is exposed because R4's capture
+// script has to wait for it too: running a panel before the support table lands
+// would report a missing backend as FAIL instead of NOWHERE, which is the exact
+// misreport this design set out to avoid. So automation waits on the same
+// promise a human does, rather than on a timer.
+let readySettle = null;
+const ready = new Promise((resolve) => { readySettle = resolve; });
+
+// window.showcase is the ONE automation seam in this page, and it is here
+// deliberately rather than as a fifth verdict or a second copy of the panel list.
+//
+// R4 needs one screenshot per panel, which means running one panel per app
+// launch — and the document is delivered with `set_html`, so there is no URL
+// query string to read an instruction from. The alternative was a V-side probe
+// mode (examples/services has seven), which ADR-0037 rejected for good reasons.
+// So the seam is: the page exposes its own `run`, and the app injects a call to
+// it. Nothing here can be reached without an app that chose to inject one — a
+// human running the showcase normally gets no argument and no automation at all.
+window.showcase = {
+  run: run,
+  ready: ready,
+  // The panel list, so the capture script and this page cannot disagree about
+  // what a panel is called.
+  panels: Object.keys(panels),
+  // The ACTION list, which is NOT the same as the panel list and the difference
+  // matters. A panel is a card on screen; an action is one entry of RUNNERS, and
+  // some panels have several (menu has `menubar` and `popup`, dialog has
+  // `dialogOpen` and `dialogMessage`). R4 captures one action per launch and
+  // names the file after the panel, so the mapping lives in the script where it
+  // is visible - and exposing `actions` here is what lets the page reject an
+  // unknown one by name instead of drawing an empty card.
+  actions: Object.keys(RUNNERS),
+};
+
+call("demo.support").then((r) => {
+  supports = JSON.parse(r);
+  document.querySelectorAll("[data-run]").forEach((b) => { b.disabled = false; });
+  document.getElementById("run-all").disabled = false;
+  const here = Object.keys(supports).filter((n) => !supports[n].ready);
+  if (here.length > 0) {
+    const note = document.createElement("span");
+    note.className = "note";
+    note.textContent = "not on this platform: " + here.join(", ");
+    tallyEl.appendChild(document.createTextNode(" — "));
+    tallyEl.appendChild(note);
+  }
+  tally();
+  if (readySettle) readySettle();
+}).catch((e) => {
+  tallyEl.textContent = "could not read the platform support table: " + msg(e);
+  if (readySettle) readySettle();
+});
+
+tally();
+</script>
+</body>
+</html>

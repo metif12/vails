@@ -440,6 +440,59 @@ symptom and it means the apartment is not taking. Check the stderr for
 logging it (S_OK / S_FALSE / RPC_E_CHANGED_MODE) is the first thing to add if
 this needs diagnosing from a bug report rather than from this machine.
 
+## F1 — drag & drop (`drop` service, ADR-0036) — **unproven at runtime**
+
+Same status as the section above, for a different reason: this one needs a human
+to drag a file, and the Windows GUI proofs need this machine's `webview` module.
+The policy (bounds, payload, which message is a drop) is proven by 18 pure-V
+tests; **the native path has never been exercised.**
+
+Read this before assuming the page gets a DOM event, because it does not.
+`DragAcceptFiles` on the top-level window takes the drop away from WebView2's
+child, so **there are no `dragover` / `drop` handlers in the page** — the service
+emits `drop:files` instead. That is the price of the only reachable exit
+(`EnableWebDrop` is a controller setting the webview library does not expose —
+ADR-0036's Context).
+
+```powershell
+# FIRST: grant the capability. `examples/services/vails.json` does not include
+# `drop` yet, because nothing in that example calls it - an unused grant is a
+# promise the manifest makes to nobody. Add to the "capabilities" array:
+#
+#   { "id": "drop", "windows": ["main"],
+#     "commands": ["drop.enable", "drop.disable"],
+#     "asset_roots": [], "platforms": [] }
+#
+# `vails doctor --config examples\services\vails.json` must then list 8
+# services and `drop` among them - that is the cheapest check that the catalog,
+# the manifest and the grant agree, and it needs no window.
+v -cc gcc -o services.exe ./examples/services
+Copy-Item C:\msys64\ucrt64\bin\{libwebview-0.12.dll,WebView2Loader.dll,libgcc_s_seh-1.dll,libstdc++-6.dll,libwinpthread-1.dll} .
+Copy-Item examples\services\frontend .\frontend -Recurse
+Copy-Item examples\services\vails.json .
+.\services.exe
+# 1. from the page's console, call window.vails.drop.enable() (needs the
+#    `drop.enable` capability granted above). Then drag ONE .txt file from
+#    Explorer onto the window.
+# 2. the page receives drop:files with {"paths":["C:\\...\\notes.txt"],"count":1}
+# 3. drag a .png and a .md TOGETHER -> one event, count 2, the user's order
+# 4. drag a whole FOLDER -> the paths the shell reports; the report is capped at
+#    64 (ADR-0036) so this is where the bound shows, and `count` is the number
+#    actually reported, not the number offered
+# 5. drag something with no name (a shortcut) -> an event with paths: [] and
+#    count 0. NOT silence: an empty report is a deliberate rule, and a page that
+#    waits for a non-empty drop is the bug this step catches
+# 6. call drop.disable() -> the next drag does nothing, and the window has no
+#    drop hook left on it
+```
+
+**What counts as passing:** steps 1–3, with the status line showing the paths.
+Step 5 is the one most likely to be got wrong and the cheapest to check.
+
+**Note on `examples/services`:** it has no drop panel yet, so steps 1 and 6 are
+console/`v.run` calls for now. Adding the panel is R4's job (one screenshot per
+panel), not this ADR's.
+
 ## Phase 5b — the GTK `dialog`, from the Windows side (ADR-0027)
 
 Nothing changed on Windows: `dialog.open` / `save` / `message` are still the

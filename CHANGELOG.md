@@ -18,8 +18,74 @@ Conventions for this file:
 
 ## [Unreleased]
 
+### Changed
+
+- **`v test .` and `vails build` need no `-ldflags`/`-cflags` on current V**
+  (ADR-0034, ADR-0038). Both documented workarounds — `-ldflags "-lws2_32"` for
+  `net.http`, and `-cflags "-Wno-incompatible-pointer-types"` for the CLI — are
+  gone on the compiler this is developed against, measured 2026-10-03 across 33
+  test files. They are still emitted by `buildplan.cli_flags` and still
+  documented, because they are *version-scoped*: a V 0.5.2 build still needs
+  them, and the flag-ordering bug behind them is real. `AGENTS.md` §1 now says
+  which compiler wants which, and says how to tell.
+- **The Windows toolchain is resolved from one variable** (ADR-0038).
+  `VAILS_TOOLCHAIN` holds a ucrt64-shaped root (`include/`, `lib/`, `bin/`) and
+  defaults to `C:/msys64/ucrt64`, so every command works unchanged on a machine
+  that sets nothing. `buildplan.toolchain` reports what it resolved, where the
+  answer came from, and which of the three vendored pieces a scoped install is
+  missing. **`-cc msvc` works for pure-V modules and refuses by name for
+  anything that links webview**: MSYS2 ships `libwebview.dll.a` and there is no
+  `webview.lib`, so no GUI target or CLI can link under MSVC without vendoring
+  one.
+
 ### Added
 
+- **`examples/showcase`: one panel per capability, four honest verdicts, one
+  tally** (ADR-0037, ROADMAP R3). Every capability gets a panel, and every panel
+  ends in a badge reading `PASS`, `NEEDS YOU`, `FAIL` or `NOWHERE` - and the
+  sticky line at the top counts all four, because "6 pass, 3 need a human, 1 not
+  on this platform, 0 fail" is a verdict on the framework and "10 panels" is not.
+  - A panel never claims `PASS` for something only a human can finish (a drag, a
+    tray right-click, a file picker). It says `NEEDS YOU` instead - ADR-0018's
+    discipline applied to a demo rather than to a backend.
+  - **The page does not decide what is supported**: `demo.support` returns
+    `services.supports()`, the same table `vails doctor` prints, and a panel whose
+    service is not ready shows the framework's own note and never calls the
+    command.
+  - Two panels are inverted on purpose, because their failure mode is silence: the
+    capability gate and the opener's scheme allowlist **pass when the call is
+    refused**.
+  - It supersedes `examples/services` as the E2E vehicle and has **no probe
+    modes**; `examples/services` is kept for the screenshots and probes it
+    already has. It is a reference, not a template - `vails init` still scaffolds
+    `hello`.
+  - **Unverified: the page itself.** It builds, its manifest validates and the
+    generated `.d.ts` carries the `drop` namespace, but no browser has executed
+    it yet (R4's job). Writing it also turned up a gap in the runtime:
+    `window.vails` has no `off`, so a listener cannot be unregistered.
+- **`drop` service: report the files a user dropped on a window** (ADR-0036).
+  `drop.enable` / `drop.disable` are capability-gated and take no params; a drop
+  arrives as one `drop:files` event carrying `{"paths": [...], "count": n}`.
+  **Paths only, never contents** - a page that wants a file's bytes has to be
+  given a way to ask, and that capability should be granted on its own.
+  Windows uses `WM_DROPFILES` on the window seam, because `EnableWebDrop` is a
+  WebView2 *host* setting the `webview` 0.12 library does not expose (its header
+  declares sixteen functions and none is about dropping).
+  - **The page gets `drop:files` and NOT the DOM's `dragover` / `drop`.**
+    `DragAcceptFiles` on the top-level window takes the drop away from WebView2's
+    child, and there is no reachable alternative - so `vails doctor` says so on
+    the `drop` line rather than reporting a bare "ok".
+  - A drop that carried nothing usable is **still reported**, with
+    `paths: []`: the user did something, and silence reads as a hang. Bounds are
+    applied to the report rather than to the drop - at most 64 paths, 1024
+    characters each, NUL-bearing paths rejected instead of truncated, and a
+    larger drop truncated keeping the user's first paths.
+  - **Windows: written and unit-tested, not observed.** 18 pure-V tests green on
+    both platforms; the native path has never seen a human drag a file. **Linux:
+    the `GtkDropTarget` half is deliberately unwritten** (no native code that has
+    never been compiled), and `doctor` says "unwritten" rather than
+    "unsupported", because only one of those is true. The outstanding runs for
+    both are in `tests/e2e_windows/README.md`.
 - **`webview.run_many` opens more than one window on Windows** (ADR-0035).
   The blocker was never the routing - that was already proven with two fake
   eval sinks - it was that WebView2 binds the HWND, the COM apartment and the

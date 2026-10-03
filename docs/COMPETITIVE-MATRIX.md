@@ -36,7 +36,7 @@ either small, already in S2, or deliberately out of scope.
 
 | Capability | Wails | Tauri | Vails today | Planned |
 |---|---|---|---|---|
-| **drag & drop (files, text, images)** | `drag-n-drop` | `drag` | **absent** | **F1 + `drop` service** (ADR-0024) |
+| **drag & drop (files, text, images)** | `drag-n-drop` | `drag` | `drop` - `WM_DROPFILES`, **Windows only, unobserved**; the page gets `drop:files`, **not** the DOM's drop events | Linux `GtkDropTarget` (ADR-0036) |
 | **multi-window / multi-webview** | `multiwindow` | `multiwindow`, `multiwebview` | routing + registry **proven**; the second Windows window is **written, unobserved** | **F0** (ADR-0035) |
 | frameless window / custom title bar | `frameless` | drag decorator + config | `webview.Config` has no chrome field | W1–W4 (ADR-0021) |
 | native popup menu | `menu`, `contextmenus` | `menu` plugin | `menu.popup` — no right-click trigger yet | `menu.set_menu`, S1 wave 4 |

@@ -113,7 +113,9 @@ Current state (all verified, not promised):
 | `cli/` | `vails init/run/build/doctor/dts/deps` |
 | `examples/hello/` | Minimal app (window + ping button) |
 | `examples/dialog/` | Two services in one window (native dialogs + os-info) |
-| `examples/services/` | Seven services in one window (clipboard, notification, opener, menu, dialog, tray, os-info) + the E2E probe vehicle |
+| `examples/multiwindow/` | Two windows, one document, `emit_to` routing by label (F0, ADR-0035) |
+| `examples/showcase/` | **The reference**: one panel per capability, four honest verdicts, one tally (R3, ADR-0037) |
+| `examples/services/` | Seven services in one window + the E2E probe vehicle (superseded as the vehicle by `showcase`, kept for its probes) |
 | `tests/e2e_windows/` | Manual Edge E2E + proof screenshot |
 | `tests/e2e_linux/` | Headless xvfb script + screenshot |
 | `docs/ADR/` | Architecture decisions (why, not what) |

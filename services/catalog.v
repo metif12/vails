@@ -20,6 +20,12 @@ pub fn manifests() []Service {
 	// recorded (dialog → notification → menu → tray → clipboard → opener →
 	// os-info) with the two services that needed the window host seam - menu
 	// and tray - moved in where that order has them, after notification.
+	//
+	// `drop` is last (ROADMAP F1) because it is the only service whose window is
+	// an *input* surface rather than an output or a decoration: every other entry
+	// here puts something in front of the user, and this one asks the user for
+	// something. The order is cosmetic - nothing looks a service up by position -
+	// but appending is the honest way to add one.
 	return [
 		dialog_manifest(),
 		notification_manifest(),
@@ -28,5 +34,6 @@ pub fn manifests() []Service {
 		clipboard_manifest(),
 		opener_manifest(),
 		os_info_manifest(),
+		drop_manifest(),
 	]
 }

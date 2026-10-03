@@ -18,34 +18,40 @@ Windows (MSYS2 ucrt64): prefix every build command with
 v -cc gcc -o hello.exe ./examples/hello
 ```
 
-**The test command on Windows carries one extra flag, and it is not
-optional:**
+**The test command on Windows needs no extra flags on the current compiler:**
 
 ```powershell
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
-v -cc gcc -ldflags "-lws2_32" test .    # 36/36
+v -cc gcc test .
 ```
 
-The reason is a V 0.5.2 bug, not a Vails one, and it is worth knowing
-because the error message points nowhere near the cause. `dev/` imports
-`net.http`; V's `dependency_scan_fallback` link path emits `-l` flags
-sourced from `#flag` **before** most object files, and GNU `ld` only
-resolves an archive against the objects that precede it — so
-`ws2_32` is on the link line and cannot resolve anyway. Symptoms are
-`undefined reference to __imp_connect` / `__WSAFDIsSet` in
-`net_sockets.c`. Adding `#flag windows -lws2_32` to the importing module
-**does not help** (tried in `dev/dev.v`, reverted); `-ldflags` does,
-because it is emitted last. See ADR-0034 and `buildplan.cli_flags`.
-
-The **CLI** has a second flag for a different reason (it embeds the dev
-server, so it needs `-cflags` too):
+The **CLI** likewise builds clean:
 
 ```powershell
-v -cc gcc -cflags "-Wno-incompatible-pointer-types" -ldflags "-lws2_32" -o vails.exe ./cli
+v -cc gcc -o vails.exe ./cli
 ```
 
-An **app** needs neither beyond `-cc gcc` — `buildplan.app_flags` asserts
-that, and the test is what stops the CLI's flags leaking into every build.
+### Both of those used to need a flag, and the reason is still worth knowing
+
+On **V 0.5.2** the test command carried `-ldflags "-lws2_32"` and the CLI carried
+`-cflags "-Wno-incompatible-pointer-types"` as well. Neither is needed on the
+compiler this machine has now (§1b) — measured 2026-10-03, 33 test files green
+with no flags at all. Keep the knowledge anyway, because the flags are not wrong,
+they are **version-scoped**:
+
+`dev/` imports `net.http`; V 0.5.2's `dependency_scan_fallback` link path emits
+`-l` flags sourced from `#flag` **before** most object files, and GNU `ld` only
+resolves an archive against the objects that precede it — so `ws2_32` is on the
+link line and cannot resolve anyway. Symptoms are `undefined reference to
+__imp_connect` / `__WSAFDIsSet` in `net_sockets.c`. Adding `#flag windows
+-lws2_32` to the importing module **does not help** (tried in `dev/dev.v`,
+reverted); `-ldflags` did, because it is emitted last. If a build ever fails with
+`undefined reference to __imp_connect` again, add the flag back rather than
+hunting: see ADR-0034 and `buildplan.cli_flags`.
+
+`buildplan.cli_flags` still emits both flags, which is deliberate — they are
+harmless on a fixed compiler and required on an unfixed one, and the test that
+asserts them is what documents that they exist on purpose.
 
 Linux (WSL Ubuntu, V built from source at /root/vsrc): GUI apps MUST use
 `-gc none` (Boehm vs WebKit fork, ADR-0005); headless runs need
@@ -91,6 +97,29 @@ The bundled skills can be read straight out of a clone instead:
 `vlib/v/skills/<name>/` to `~/.agents/skills/<name>/`, which is exactly what
 `v skills add <name> --global` does. Installed 2026-09-30: `v-lang`,
 `v-testing`, `v-concurrency`, `v-memory`, `v-workflow`.
+
+### 1c. `v` is now V *master*, and that changes §1
+
+Re-measured 2026-10-03. `C:\Users\xman\AppData\Local\Programs\v` is **gone**,
+and `v` on PATH is `C:\Users\xman\v\.bin\v.bat`, a one-line forwarder to
+`C:\Users\xman\v\v.exe` — which is now **V 0.5.2 `0137eb5`, i.e. master**, not
+the 0.5.2 release the notes above describe. Consequences, all measured:
+
+- **The two link flags are gone.** `v -cc gcc test .` and
+  `v -cc gcc -o vails.exe ./cli` both succeed with no `-ldflags` and no
+  `-cflags` (see §1). The flags are still *documented* because they are still
+  needed on 0.5.2.
+- **`json2` exists** in this vlib, so the §1b failure mode no longer applies —
+  but §1b stays, because the shape of the problem (two installs, one of which
+  cannot build this repo) is what made it expensive.
+- **VSH works**: `v run script.vsh` compiles and runs a `.vsh` file. Three
+  script-mode rules cost real time and are written up where they bit —
+  `tests/e2e_windows/capture.vsh` carries all three in its header. The short
+  version: a `.vsh` has **no `module` line**, its **top-level statements are the
+  program** (so `fn main()` is never called), and **all definitions must precede
+  all code** or the file compiles to a binary that silently does nothing.
+- Agent skills from the bundled catalog are installed at
+  `~/.agents/skills/v-{lang,testing,concurrency,memory,workflow}`.
 
 `webview_linux.c.v` compiles on Linux only (V `_linux` suffix rule).
 All other modules must compile and pass tests on **Windows too** —

@@ -36,6 +36,7 @@ pub fn supports() []ServiceStatus {
 		clipboard_support(),
 		opener_support(),
 		os_info_support(),
+		drop_support(),
 	]
 }
 

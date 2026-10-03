@@ -110,11 +110,11 @@ fn test_granted_commands_dedupes() {
 
 // The catalog wrappers are the seam the CLI and the services build on;
 // Phase 5 S1 wave 1 put dialog and os_info in it, wave 2 added
-// notification, menu, tray, clipboard and opener. The count is asserted
-// exactly: a service that is added to the catalog without a manifest test here
-// is a service nobody looked at.
+// notification, menu, tray, clipboard and opener, and F1 added drop. The count
+// is asserted exactly: a service that is added to the catalog without a
+// manifest test here is a service nobody looked at.
 fn test_catalog_wrappers_see_the_built_in_services() {
-	assert manifests().len == 7
+	assert manifests().len == 8
 	assert (find('dialog') or { panic('missing') }).name == 'dialog'
 	assert (find('os_info') or { panic('missing') }).name == 'os_info'
 	assert (find('clipboard') or { panic('missing') }).name == 'clipboard'
@@ -122,6 +122,7 @@ fn test_catalog_wrappers_see_the_built_in_services() {
 	assert (find('notification') or { panic('missing') }).name == 'notification'
 	assert (find('menu') or { panic('missing') }).name == 'menu'
 	assert (find('tray') or { panic('missing') }).name == 'tray'
+	assert (find('drop') or { panic('missing') }).name == 'drop'
 	assert service_of('dialog.open') != none
 	assert service_of('os_info.get') != none
 	assert service_of('clipboard.read_text') != none
@@ -129,6 +130,7 @@ fn test_catalog_wrappers_see_the_built_in_services() {
 	assert service_of('notification.notify') != none
 	assert service_of('menu.popup') != none
 	assert service_of('tray.set') != none
+	assert service_of('drop.enable') != none
 	// a name nothing provides is reported, not silently ignored
 	svcs, unknown := select_for(['dialog.open', 'ping'])
 	assert svcs.len == 1
