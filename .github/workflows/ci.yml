@@ -80,6 +80,24 @@ jobs:
         # own `make` on Windows is not what this job is here to test.
         run: winget install --id=VLang.V --accept-source-agreements --accept-package-agreements --silent
 
+      - name: This compiler can build this repo
+        # A smoke step, and it exists because of a measured failure mode rather
+        # than a hypothetical one: `bridge/` and `state/` import `json2`, and a V
+        # install whose vlib has no `json2` fails with
+        #   builder error: cannot import module "json2" (not found)
+        # which reads like a missing dependency in this repo and is not one. On
+        # 2026-10-03 BOTH V installs on the machine that could have built it were
+        # affected in one way or another (one lacked json2, the other needed
+        # -enable-globals). A version check here turns "CI is red for a reason
+        # nobody can see" into one line of output.
+        run: |
+          v version
+          if (-not (Test-Path (Join-Path (Split-Path (Split-Path (Get-Command v).Source)) 'vlib\json2'))) {
+            Write-Error "this V has no vlib\json2, and bridge/ and state/ import it - install a newer V (V master has it; see AGENTS.md 1b)"
+            exit 1
+          }
+          Write-Output "json2 present"
+
       - name: Install MSYS2 ucrt64 + the webview packages
         run: |
           choco install msys2 -y --no-progress
@@ -93,14 +111,17 @@ jobs:
         # affects subsequent steps, which is exactly the scope wanted.
         run: "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: v test .
-        # The `-ldflags` is not optional on gcc 16, and the reason is a V
-        # bug rather than a repo one: V 0.5.2's `dependency_scan_fallback`
-        # link path emits `#flag`-sourced `-l` flags BEFORE most object
-        # files, and GNU ld only resolves an archive against the objects
-        # that precede it, so `net.http`'s `ws2_32` never resolves. It has
-        # to arrive as `-ldflags`, which is emitted last. Documented in
-        # AGENTS.md §1 and in `buildplan.cli_flags`.
+- name: v test .
+        # The `-ldflags` is not optional **on V 0.5.2**, which is what the winget
+        # step above installs, and the reason is a V bug rather than a repo one:
+        # V 0.5.2's `dependency_scan_fallback` link path emits `#flag`-sourced
+        # `-l` flags BEFORE most object files, and GNU ld only resolves an archive
+        # against the objects that precede it, so `net.http`'s `ws2_32` never
+        # resolves. It has to arrive as `-ldflags`, which is emitted last.
+        #
+        # It is also unnecessary on a newer V, measured 2026-10-03 across 33 test
+        # files on V master — so the flag is here because of the compiler this job
+        # pins, not because the repo needs it. See AGENTS.md 1 and 1b.
         run: v -cc gcc -ldflags "-lws2_32" test .
 
       - name: build the CLI

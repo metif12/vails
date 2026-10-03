@@ -1,5 +1,24 @@
 # Windows E2E (manual, needs MSYS2 ucrt64 + Edge WebView2 runtime)
 
+## Which capture tool to use: `capture.ps1`, not `capture.vsh`
+
+Two capture scripts live here and only one works.
+
+| | |
+|---|---|
+| **`capture.ps1`** | **Use this.** It works, and every command below calls it. |
+| `capture.vsh` | A V shell script that **compiles, returns correct exit codes, and prints nothing at all**. Unresolved as of 2026-10-03. |
+
+The `.vsh` failure is worth naming precisely, because it is not a build failure
+and not a missing window: its code is provably in the binary (the string literals
+are in the `.exe`), `entry()` runs (exit codes differ per command), a bare
+`println` at top level *in that file* prints nothing, and four-line probe scripts
+using the same `capture_shim.h` print correctly. So the encoder and the
+privacy clamp inside it are the parts believed good, and the fault is structural.
+Its header documents all of it, including the three VSH script-mode rules that
+*were* real bugs along the way. Do not spend an afternoon on it before reading
+that header.
+
 ```sh
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
 v -cc gcc -o hello.exe ./examples/hello
@@ -41,7 +60,9 @@ Verified 2026-09-26: full JS→V→JS round trip (`window.vails.call('ping')`
 ```sh
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
 # CLI itself imports net (dev server): gcc 16 needs these two flags
-v -cc gcc -cflags '-Wno-incompatible-pointer-types' -ldflags '-lws2_32' -o vails.exe ./cli
+v -cc gcc -o vails.exe ./cli
+# (0.5.2 needed -cflags '-Wno-incompatible-pointer-types' -ldflags '-lws2_32' here;
+#  the current compiler needs neither - AGENTS.md §1)
 # copy next to vails.exe: libwebview-0.12.dll, WebView2Loader.dll,
 # libgcc_s_seh-1.dll, libstdc++-6.dll, libwinpthread-1.dll (from ucrt64/bin)
 ./vails.exe init smokeapp; cd smokeapp

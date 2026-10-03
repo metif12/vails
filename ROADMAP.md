@@ -639,10 +639,12 @@ cannot start. Hence B1 before B3.
   `libstdc++-6.dll`, `libwinpthread-1.dll`) when
   `bundle.windows_dll_side_by_side` is set; put `-gc none` **inside**
   `build_app` (ADR-0005: Boehm GC crashes with WebKit's subprocesses) rather
-  than in a CI command a developer has to remember; **two build recipes, not
-  one** — the CLI imports `net` for the dev server and needs
-  `-cflags '-Wno-incompatible-pointer-types' -ldflags '-lws2_32'` on gcc 16,
-  while an app needs only `v -cc gcc`; and `doctor` stops hard-coding
+than in a CI command a developer has to remember; **two build recipes, not
+  one** - the CLI imports `net` for the dev server and, **on V 0.5.2**, needed
+  `-cflags '-Wno-incompatible-pointer-types' -ldflags '-lws2_32'` on gcc 16
+  (not needed on the current compiler - AGENTS.md §1b - so the two recipes now
+  differ only in what they *emit*, not in what they *require*); and `doctor` stops
+  hard-coding
   `vails.json` (`cli/vails.v:356`) so it honours `--config`, which is what a
   multi-project workspace needs. Pure-V parts (flag sets, DLL list, output
   name) extracted as functions so they unit-test on Windows without a
@@ -675,9 +677,10 @@ cannot start. Hence B1 before B3.
   The Windows job's distinguishing step is the one B1 made possible: it
   runs `vails build` and then **asserts the five DLLs are in the artifact
   directory**, because a green CI shipping an `.exe` that cannot start is
-  worse than no CI. The Windows test line also carries
-  `-ldflags "-lws2_32"`, which is not optional and is not a Vails bug —
-  see ADR-0034 correction 2.
+worse than no CI. The Windows test line also carries `-ldflags "-lws2_32"`,
+  which **V 0.5.2 required and the current compiler does not** — see ADR-0034
+  correction 2 and AGENTS.md §1b. The flag stays in the recipe either way: it is
+  harmless on a fixed compiler and required on an unfixed one.
 - [ ] **B4 — Linux packaging + release on a tag**: AppImage and `deb` (the
   Phase 7 line already names `nfpm`; this finishes it rather than starting
   it), side-by-side folder for Windows, and on a tag a version-stamped build

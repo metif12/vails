@@ -107,15 +107,6 @@ Conventions for this file:
 
 ### Changed
 
-- **`v test .` on Windows now needs `-ldflags "-lws2_32"`**
-  (ADR-0034). This is a V 0.5.2 bug, not a Vails one: the
-  `dependency_scan_fallback` link path emits `-l` flags from `#flag`
-  *before* most object files, and GNU `ld` only resolves an archive
-  against the objects that precede it — so `net.http`'s `ws2_32` is on
-  the link line and cannot resolve anyway. A `#flag` in the importing
-  module does **not** fix it (tried, reverted); `-ldflags` does, because
-  it is emitted last. The command in `AGENTS.md` §1 is updated, and
-  `buildplan.cli_flags` explains it next to the code.
 - **`vails doctor` takes `--config`** (ADR-0034). It hard-coded
   `vails.json`, which made it useless in a workspace with more than one
   project in it — which is exactly what a build matrix looks like.

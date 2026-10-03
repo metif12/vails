@@ -61,69 +61,59 @@ Linux (WSL Ubuntu, V built from source at /root/vsrc): GUI apps MUST use
 The Linux `v` is **not on PATH**: call it as `wsl -d Ubuntu -- /root/vsrc/v <args>`
 (or `export PATH=/root/vsrc:$PATH` inside the shell first).
 
-### 1b. There are TWO V installs on this machine, and only one of them builds this repo
+### 1b. Which V is on this machine, and what that changes
 
-Measured 2026-09-30, and it cost a confusing afternoon, so it is written down:
+One section, because the previous two contradicted each other within an hour of
+each other — which is the lesson. `v` on PATH is now `C:\Users\xman\v\.bin\v.bat`,
+a one-line forwarder to `C:\Users\xman\v\v.exe`, which is **V 0.5.2 `0137eb5`,
+i.e. master**, built from a git checkout (re-measured 2026-10-03).
 
-| | |
-|---|---|
-| `C:\Users\xman\AppData\Local\Programs\v\v.exe` (first on PATH) | V 0.5.2 `7647ce1`. Its vlib has **no `json2`** |
-| `C:\Users\xman\v\v.exe` (a git checkout, built from source) | V 0.5.2 `a9424eb`. Its vlib **has `json2`** |
-
-`bridge/` and `state/` import `json2`, so plain `v test .` against the PATH
-install fails with
-
-```
-builder error: cannot import module "json2" (not found)
-```
-
-which reads like a Vails dependency problem and is not one. **Use
-`C:\Users\xman\v\v.exe` for anything that builds this repo**, or put
-`C:\Users\xman\v` ahead of `Programs\v` on PATH.
-
-`v up` is **not** how you fix this: it replaces the install's `vlib` with V
-master's and then cannot compile master's own `vup` tool with the 0.5.2 `v.exe`
-that is already there (`use -enable-globals ... to enable globals`), which
-leaves the install unusable — *every* build fails, including `jsesc`. The
-recovery is `git -C "C:\Users\xman\AppData\Local\Programs\v" checkout
-7647ce1c6f`, which puts `v.exe` and `vlib` back in the same commit.
-
-V master does carry two things this repo will want — `v skills`
-(`vlang/v`'s bundled agent skills) and `v mcp serve` (a compiler MCP server) —
-but building it needs `makev.bat` in a console with inheritable handles. From an
-agent shell it fails with `failed SetHandleInformation: The handle is invalid`.
-The bundled skills can be read straight out of a clone instead:
-`git clone --depth 1 https://github.com/vlang/v`, then copy
-`vlib/v/skills/<name>/` to `~/.agents/skills/<name>/`, which is exactly what
-`v skills add <name> --global` does. Installed 2026-09-30: `v-lang`,
-`v-testing`, `v-concurrency`, `v-memory`, `v-workflow`.
-
-### 1c. `v` is now V *master*, and that changes §1
-
-Re-measured 2026-10-03. `C:\Users\xman\AppData\Local\Programs\v` is **gone**,
-and `v` on PATH is `C:\Users\xman\v\.bin\v.bat`, a one-line forwarder to
-`C:\Users\xman\v\v.exe` — which is now **V 0.5.2 `0137eb5`, i.e. master**, not
-the 0.5.2 release the notes above describe. Consequences, all measured:
+Consequences, all measured on this machine:
 
 - **The two link flags are gone.** `v -cc gcc test .` and
   `v -cc gcc -o vails.exe ./cli` both succeed with no `-ldflags` and no
-  `-cflags` (see §1). The flags are still *documented* because they are still
-  needed on 0.5.2.
-- **`json2` exists** in this vlib, so the §1b failure mode no longer applies —
-  but §1b stays, because the shape of the problem (two installs, one of which
-  cannot build this repo) is what made it expensive.
+  `-cflags`, across 33 test files. They are still *documented* in §1 because they
+  are version-scoped, and `buildplan.cli_flags` still emits them.
+- **`json2` exists in this vlib**, so the build works.
 - **VSH works**: `v run script.vsh` compiles and runs a `.vsh` file. Three
   script-mode rules cost real time and are written up where they bit —
-  `tests/e2e_windows/capture.vsh` carries all three in its header. The short
-  version: a `.vsh` has **no `module` line**, its **top-level statements are the
-  program** (so `fn main()` is never called), and **all definitions must precede
-  all code** or the file compiles to a binary that silently does nothing.
-- Agent skills from the bundled catalog are installed at
-  `~/.agents/skills/v-{lang,testing,concurrency,memory,workflow}`.
+  `tests/e2e_windows/capture.vsh` carries them in its header. The short version:
+  a `.vsh` has **no `module` line**, its **top-level statements are the program**
+  (so `fn main()` is never called), and **all definitions must precede all code**
+  or the file compiles to a binary that silently does nothing.
+- Agent skills from V's bundled catalog are installed at
+  `~/.agents/skills/v-{lang,testing,concurrency,memory,workflow}`. They were
+  copied out of a clone rather than installed with `v skills add --global`,
+  which does the same thing: see below.
 
-`webview_linux.c.v` compiles on Linux only (V `_linux` suffix rule).
-All other modules must compile and pass tests on **Windows too** —
-this repo's CI machine is Windows without gcc/pkg-config.
+#### Two history worth keeping, because both cost an afternoon
+
+**There were two V installs, and one could not build this repo.** Until
+2026-10-03, `C:\Users\xman\AppData\Local\Programs\v` (V 0.5.2 `7647ce1`) was
+first on PATH, and its vlib had **no `json2`** — so `bridge/` and `state/`, which
+import it, failed with `builder error: cannot import module "json2" (not found)`.
+That reads like a Vails dependency problem and is not one. That install is now
+gone; the trap worth remembering is the shape of it, not the path.
+
+**`v up` is not a way to fix a Vails build.** It replaces the install's `vlib`
+with V master's and then cannot compile master's own `vup` tool with the 0.5.2
+`v.exe` already sitting there (`use -enable-globals ... to enable globals`),
+which leaves the install unusable — *every* build fails, `jsesc` included. The
+recovery was `git -C "...\Programs\v" checkout 7647ce1c6f`, which puts `v.exe`
+and `vlib` back in the same commit. **If `v` ever fails on every single build,
+suspect a half-applied `v up` before suspecting the repo.**
+
+#### `v skills` and `v mcp serve` exist upstream, with a caveat
+
+V master carries both: `v skills` (the bundled agent skills) and `v mcp serve`
+(a compiler MCP server). Building master needs `makev.bat` **in a console with
+inheritable handles** — from an agent shell it fails with
+`failed SetHandleInformation: The handle is invalid`. The bundled skills can be
+read straight out of a clone instead: `git clone --depth 1
+https://github.com/vlang/v`, then copy `vlib/v/skills/<name>/` to
+`~/.agents/skills/<name>/`, which is exactly what `v skills add <name> --global`
+does. `v mcp serve` needs the built compiler, so it is not available here yet.
+
 
 ## 2. V style rules
 

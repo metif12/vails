@@ -204,7 +204,7 @@ is not optional:**
 
 ```powershell
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
-v -cc gcc -ldflags "-lws2_32" test .    # 36 test files
+v -cc gcc test .    # 33 test files (`webview` is excluded; see the ROADMAP)
 ```
 
 The reason is a V 0.5.2 bug rather than a Vails one: `dev/` imports
