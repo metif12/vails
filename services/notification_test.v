@@ -237,10 +237,45 @@ fn test_toast_xml_carries_the_clamped_duration() {
 fn test_is_supported_is_true_only_where_a_backend_exists() {
 	// The point of the command: an honest answer, so a frontend can ask
 	// instead of firing a notification that quietly does nothing.
+	//
+	// **This is the COMPILE-TIME question**, deliberately separate from
+	// `notification_support()`: "is the backend built in" is true on every Windows
+	// machine, while "can this session show one" is not. Both are real questions
+	// and conflating them is what made `doctor` lie - see the next test.
 	$if windows {
 		assert is_supported()
 	} $else {
 		assert !is_supported()
+	}
+}
+
+// `doctor` must not claim a notification works where one cannot be shown.
+//
+// The bug this pins, found by the showcase's verify run on 2026-10-03: `doctor`
+// printed `ok notification` and the showcase's support table said ready, so the
+// panel called `notification.notify` and got
+// `RoGetActivationFactory` -> `hr=0x80040154` (REGDB_E_CLASSNOTREG). A doctor
+// line that says ok for something that does not work *here* is the over-read
+// AGENTS.md 5 exists to prevent, and it was only reachable because
+// `notification_support()` hardcoded `ready: true` instead of probing.
+fn test_support_agrees_with_what_the_machine_can_actually_do() {
+	s := notification_support()
+	assert s.name == 'notification'
+	$if windows {
+		assert s.ready == toast_available(), 'notification_support().ready must ' +
+			'be the machine probe (toast_available), never a hardcoded true'
+		// Whichever way it went, the note has to explain itself - a stub without a
+		// reason is useless in a doctor report, and support_test.v's invariant
+		// already requires one but not that it is *useful*.
+		if !s.ready {
+			assert s.note.contains('REGDB_E_CLASSNOTREG') || s.note.contains('do not activate')
+			// And the compile-time answer must not have been dragged along with it:
+			// the backend IS in the build, and saying otherwise would send a reader
+			// looking for a missing dependency that is not missing.
+			assert is_supported()
+		}
+	} $else {
+		assert !s.ready
 	}
 }
 

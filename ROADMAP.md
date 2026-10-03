@@ -1076,17 +1076,30 @@ a small platform nicety, or a non-goal with a reason attached.
     "running" line; `IDLE` was counted as a verdict, which pushed the tally past
     11 and made "panels never ran" read 0; and `demo.finish` never closed the
     window. Four of the five were invisible to a human reading the window.
+- **The `notify` FAIL turned out to be the framework lying, not the machine.**
+    `notification_support()` answered "is the backend **compiled in**" and
+    `doctor` printed it as "can this machine show one" — and the machine-level
+    probe, `toast_available()`, existed and was **called by nothing**. That dead
+    function was the whole bug. `doctor` now activates the WinRT classes for real,
+    reports a `stub` line carrying the HRESULT when they do not, and a test
+    asserts the support line and the probe cannot disagree. The panel then
+    reported **`NOWHERE` instead of `FAIL`** — which is the design working: the
+    support table is what the page reads, and a command that cannot work here is
+    never called. **This machine has no registered `ToastNotificationManager`**
+    (`hr=0x80040154`), which is a fact about this session, and `doctor` now says
+    so instead of guessing.
+  - **Final state of the run: `7 pass, 0 fail, 1 not on this platform, 3 never
+    ran`, exit code 0.** No fake green anywhere in it: the one capability that
+    cannot work here is named as such rather than passed or failed.
   - **Two open findings, named rather than guessed**:
     1. **`Ctx.close()` does not close a window on Windows.** It reports success —
        `webview_terminate` is reached and returns 0 — and `webview_run` never
        returns. So a verify run gets a **watchdog**: after 15 s it prints the
        report and ends the process itself. A harness that depends on the
-       thing-under-test's shutdown cannot report a failure *of* that shutdown.
-    2. **The WinRT toast fails with `hr=0x80040154`** (REGDB_E_CLASSNOTREG, the
-       class is not registered). Candidate causes are an unregistered
-       AppUserModelID for an unpackaged app and a session without the toast
-       platform; this is **not yet attributed**, and the earlier
-       `notification.png` proof does not settle it.
+       thing-under-test's shutdown path cannot report a failure *of* that path.
+    2. The WinRT toast's `REGDB_E_CLASSNOTREG` is now **attributed** to the
+       machine, so the remaining question is only whether an older
+       `notification.png` was ever a real toast on this host.
   - **The report logic is not unit-tested**, because it lives in `examples/` and
     `v test .` does not reach examples. Moving it into a framework module would
     be the wrong home for logic only this app uses; the verify run is its test.

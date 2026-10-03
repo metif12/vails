@@ -119,13 +119,27 @@ Two consequences worth being honest about:
   **watchdog** that ends the process itself after 15 s rather than trusting the
   app's own shutdown path — a harness that depends on the shutdown of the thing it
   is testing cannot report a failure *of* that shutdown.
-- R3 is no longer unchecked. **Proven on Windows 2026-10-03**: seven capabilities
-  verified in one run (bridge, capability gate, os_info, clipboard, opener, window
-  menu bar, main-thread post), one line each. The `notify` panel **fails** with
-  `RoGetActivationFactory` → `hr=0x80040154` and is **not yet attributed** — the
-  two candidates are an unregistered AppUserModelID for an unpackaged app and a
-  session without the toast platform. Three panels (dialog, tray, drop) are
+- R3 is no longer unchecked. **Proven on Windows 2026-10-03**: `7 pass, 0 fail,
+  1 not on this platform, 3 never ran`, exit code 0. Seven capabilities verified in
+  one run (bridge, capability gate, os_info, clipboard, opener, window menu bar,
+  main-thread post), one line each. Three panels (dialog, tray, drop) are
   human-only by construction and are reported as never run rather than guessed at.
+- **The one capability that cannot work here is the one that proved the design.**
+  `notify` first reported `FAIL` — `RoGetActivationFactory` → `hr=0x80040154` —
+  and the investigation ended in the framework, not the machine:
+  `notification_support()` was answering "is the backend *compiled in*" while
+  `doctor` presented it as "can this machine show one", and the machine-level probe
+  `toast_available()` existed and was called by **nothing**. With `doctor` honest,
+  the panel reports `NOWHERE`, refuses to make the call, and the run is green
+  without a single fake pass. That is the whole thesis of this ADR in one
+  measurement: a panel that reads the framework's own support table cannot be
+  fooled by the framework overstating itself.
+- **Five bugs were found by the first run**, four of which no human reading the
+  window would have seen: the clipboard panel sent `{text}` where the service takes
+  a bare JSON string; the os_info panel set its badge by hand and so reported
+  nothing at all; `run("menubar")` painted a panel named `menubar`, which does not
+  exist; `IDLE` was counted as a verdict, which pushed the tally past 11 and made
+  "panels never ran" read 0; and `demo.finish` never closed the window.
 
 ## Verification
 

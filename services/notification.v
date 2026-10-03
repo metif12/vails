@@ -356,13 +356,51 @@ pub fn install_notification(mut router bridge.Router, ctx webview.Ctx, id AppIde
 }
 
 // notification_support answers "can this platform show a notification?" (see
-// support.v). Same `$if` as the dispatch, so the two cannot disagree.
+// support.v). Same `$if` as the dispatch, so the two cannot disagree about
+// *which* platforms have a backend.
+//
+// ## Why this probes, when `is_supported()` deliberately does not
+//
+// There are two questions and they have different answers:
+//
+//   - `is_supported()` — **is the backend compiled into this build?** A compile
+//     time fact, true on every Windows machine, and `notification_test.v` asserts
+//     exactly that. Correct as it is.
+//   - `notification_support()` — **can a notification actually be shown *here,
+//     now*?** That is `toast_available()`, which activates the WinRT classes.
+//
+// `support.v`'s contract says `ready` means "the command works here", which is the
+// second question. The first version of this function answered the *first* one by
+// hardcoding `ready: true`, and the showcase's verify run on 2026-10-03 caught
+// exactly the consequence: `doctor` printed `ok notification`, the showcase's
+// support table said ready, so the panel called `notification.notify` — and it
+// failed with `RoGetActivationFactory` → `hr=0x80040154` (REGDB_E_CLASSNOTREG,
+// the ToastNotificationManager class is not registered in that session).
+//
+// So the honest answer costs one probe, and the probe already existed: it was
+// `toast_available()`, defined and **called by nothing**. That dead function was
+// the whole bug.
 pub fn notification_support() ServiceStatus {
 	$if windows {
+		if toast_available() {
+			return ServiceStatus{
+				name:  'notification'
+				ready: true
+				note:  'WinRT toast (Windows.UI.Notifications); needs bundle.identifier as the AppUserModelID'
+			}
+		}
+		// Not ready, and the note says which of the two questions answered no —
+		// because "the backend is missing" and "this session cannot show one" send
+		// a reader to completely different places.
 		return ServiceStatus{
 			name:  'notification'
-			ready: true
-			note:  'WinRT toast (Windows.UI.Notifications); needs bundle.identifier as the AppUserModelID'
+			ready: false
+			note:  'the toast backend IS built in (notification.is_supported is ' +
+				'true), but the WinRT toast classes do not activate in this ' +
+				'session - ToastNotificationManager returned ' +
+				'REGDB_E_CLASSNOTREG (hr=0x80040154). A notify call will fail; ' +
+				'the usual cause is a session with no registered notification ' +
+				'platform, or an app with no registered AppUserModelID'
 		}
 	} $else {
 		return ServiceStatus{

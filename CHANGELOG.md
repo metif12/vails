@@ -20,15 +20,26 @@ Conventions for this file:
 
 ### Added
 
+- **`vails doctor` no longer claims a notification works where one cannot be
+  shown.** `notification`'s support line was a hardcoded `ready: true` — a
+  *compile-time* fact dressed up as a runtime one — while `notification.is_supported`
+  answers a deliberately different question ("is the backend compiled in?"). The
+  machine-level probe, `toast_available()`, **existed and was called by nothing**,
+  and that dead function was the entire bug. `doctor` now activates the WinRT
+  classes for real and reports a `stub` line with the HRESULT when they do not.
+  Found by the showcase's verify run, which called `notification.notify` on the
+  strength of the false claim and got
+  `RoGetActivationFactory` → `hr=0x80040154` (`REGDB_E_CLASSNOTREG`). A test now
+  asserts the support line and the machine probe cannot disagree.
 - **`VAILS_SHOWCASE_VERIFY=1` makes the showcase report as text and an exit code**
   (ADR-0037, ROADMAP R4). It runs every panel a machine can complete and prints
   each verdict as it happens, because **a PNG is not a verdict** — nobody can diff
   a screenshot for "the clipboard panel passed". The process exits non-zero on any
   `FAIL`, and also on "almost nothing reported", since a run that exits 0 because
   nothing ran is the failure mode that matters most here. `NEEDS YOU` and
-  `NOWHERE` do **not** fail a run: a Linux box with no `drop` backend is not a
-  broken box. **Proven on Windows 2026-10-03**: 7 pass, 1 fail, 3 human-only
-  panels never ran — and the first run found five bugs in the showcase itself.
+  `NOWHERE` do **not** fail a run. **Proven on Windows 2026-10-03**: `7 pass,
+  0 fail, 1 not on this platform, 3 never ran`, exit 0 — and the first run found
+  five bugs in the showcase itself.
 - **`demo.verdict` / `demo.finish`** — the channel a verify run reports through.
   The page owns each verdict (V cannot read the DOM) and this is how one becomes
   text. Both are unset on a normal launch: no probe modes, no injected script, and

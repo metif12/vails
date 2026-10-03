@@ -26,14 +26,39 @@ fn test_os_info_is_always_ready() {
 }
 
 fn test_support_matches_the_dispatch_branch() {
-	// is_supported() and notification_support() are two answers to the same
-	// question; if they ever disagree, one of them is lying to a frontend.
-	assert is_supported() == notification_support().ready
+	// `is_supported()` and `notification_support()` answer **different**
+	// questions, and this test used to assert they were the same one:
+	//
+	//     assert is_supported() == notification_support().ready
+	//
+	// That equality is what made `doctor` lie. `is_supported()` is a COMPILE-TIME
+	// fact ("is the backend built in") and is true on every Windows machine;
+	// `notification_support().ready` is a RUNTIME fact ("can a notification be
+	// shown here, now"). On this machine they disagree, and **the disagreement is
+	// the information** — it is exactly why a notify call fails with
+	// `REGDB_E_CLASSNOTREG` while the framework insists it is supported.
+	//
+	// So the invariant is not equality, it is that neither one lies about the
+	// other: `ready` must be the machine probe, and `is_supported` must stay true
+	// whatever the machine can do.
+	//
+	// `toast_available` only exists in the Windows backend, so the probe is
+	// asserted under `$if windows` rather than unconditionally — a Linux build
+	// would not compile it, and a test that only compiles on one platform is a
+	// test nobody runs on the other.
 	$if windows {
+		assert notification_support().ready == toast_available()
+	} $else {
+		// No toast backend off Windows, so there is nothing to probe and the
+		// support line must say so.
+		assert !notification_support().ready
+	}
+	$if windows {
+		assert is_supported(), 'the backend is compiled in on Windows regardless ' +
+			'of what the machine can show'
 		assert clipboard_support().ready
 		assert opener_support().ready
 		assert dialog_support().ready
-		assert notification_support().ready
 	} $else $if linux {
 		// clipboard and opener got real backends in wave 2; dialog is still
 		// the GTK stub and notification has no backend at all
@@ -41,6 +66,7 @@ fn test_support_matches_the_dispatch_branch() {
 		assert opener_support().ready
 		assert !dialog_support().ready
 		assert !notification_support().ready
+		assert !is_supported()
 	} $else {
 		assert !clipboard_support().ready
 		assert !opener_support().ready
