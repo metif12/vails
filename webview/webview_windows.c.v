@@ -101,28 +101,36 @@ fn bind_cb(id &char, req &char, arg voidptr) {
 //
 // The rule it implements is one line — **evaluate on the thread that owns this
 // webview, whichever thread that turns out to be** — and both branches were
-// forced by a real failure, not chosen:
+// forced by real failures rather than chosen:
 //
 //   - FROM THE WINDOW'S OWN THREAD it calls `webview_eval` directly, exactly as
 //     the single-window version always did. This is not an optimisation: the
 //     first attempt routed everything through `webview_dispatch`, and the post
 //     probe (U0) stopped working — the wakeup handler runs INSIDE the window's
 //     message loop, and asking the library to re-dispatch a callback to the
-//     loop that is currently calling it is refused (dispatch returned 0, and
-//     the page never saw its result). Keeping the direct call also means the
+//     loop that is currently calling it is refused (dispatch returned
+//     WEBVIEW_ERROR_OK, which the old wrapper read as failure, and the page
+//     never saw its result). Keeping the direct call also means the
 //     long-standing behaviour that an emit from a handler has taken effect by
-//     the time the handler returns is unchanged.
+//     the time the handler returns is unchanged, which is what services rely on.
 //   - FROM ANY OTHER THREAD (a `spawn`ed worker, or another window's loop, both
-//     of which exist because of F0) it dispatches, because `webview_eval` off
-//     the owning thread is undefined behaviour for WebView2.
+//     of which exist because of F0) it hands the snippet to post_to_main, which
+//     runs it on the window thread. NOT webview_dispatch, which is the obvious
+//     tool and does not work: it needs a COM apartment on the CALLING thread,
+//     and the caller here is by definition a worker that has none. Measured as
+//     0xC0000005 inside libwebview-0.12.dll (see webview_shim.h).
 //
 // Which thread owns the window is decided once, by reading the thread id HERE
 // — this function body runs on that thread, before `webview_run` — and carried
 // in the closure. Comparing ids is what makes the fast path possible; without
 // it every emit would take the slow path and the synchronous behaviour that
 // services depend on would be gone.
-fn eval_sink(w voidptr, owner_thread u32) fn (js string) ! {
-	return fn [w, owner_thread] (js string) ! {
+//
+// `mt` and `parent` are the two things post_to_main needs, passed separately
+// rather than as a Ctx so this closure does not have to capture the Ctx that
+// contains it.
+fn eval_sink(w voidptr, owner_thread u32, mt &MainThread, parent voidptr) fn (js string) ! {
+	return fn [w, owner_thread, mt, parent] (js string) ! {
 		unsafe {
 			if C.GetCurrentThreadId() == owner_thread {
 				// 0 == WEBVIEW_ERROR_OK
@@ -133,9 +141,57 @@ fn eval_sink(w voidptr, owner_thread u32) fn (js string) ! {
 				}
 				return
 			}
-			if C.vails_eval_dispatch(w, js.str) == 0 {
-				return error('vails: could not hand a snippet to this window ' +
-					'from another thread (the webview is not running)')
+			// The snippet is copied into the closure here, on the calling
+			// thread, which is what makes handing it over safe: `js` is a
+			// temporary that would otherwise be freed before the window thread
+			// read it.
+			//
+			// The eval inside the job cannot report back — a Job returns
+			// nothing, because by the time it runs the caller that could have
+			// received an error is gone (jobs.v says the same). So a failure
+			// there is printed rather than returned. That is the honest
+			// asymmetry: the POST is reportable and is reported, the eval is
+			// not.
+			post_ctx := Ctx{
+				label:  ''
+				parent: parent
+				main:   mt
+			}
+			post_to_main(post_ctx, eval_job(w, js)) or {
+				return error('vails: could not hand a snippet to this window from ' +
+					'another thread: ' + err.msg())
+			}
+		}
+	}
+}
+
+// eval_job is the closure that actually runs the snippet, on the window thread.
+//
+// It is a separate named function because a closure LITERAL cannot be an
+// argument to a call that is followed by `or` in this V: the parser attaches the
+// `or` to the anonymous function and reports `expected return type, not 'or' for
+// anonymous function`. Measured, and the message at least names the problem.
+//
+// It cannot report a failure, and that is not an oversight. A Job returns
+// nothing (jobs.v: by the time it runs, the caller that could have received an
+// error is gone), so the eval is printed rather than returned. The honest
+// asymmetry is that the POST is reportable and is reported by the caller, while
+// the eval is not reportable at all.
+fn eval_job(w voidptr, js string) Job {
+	// The `()` is REQUIRED and its absence is a parse error, not a style choice:
+	// a closure literal with a capture list and no explicit signature does not
+	// parse as a return expression in this V, and the message points at the
+	// function's own closing brace rather than at the closure. Measured in a
+	// standalone file with no Vails code - `return fn [js] { … }` fails,
+	// `return fn [js] () { … }` compiles. That belongs in AGENTS.md §2b; it is
+	// recorded here so the next reader does not rediscover it.
+	return fn [w, js] () {
+		unsafe {
+			// 0 == WEBVIEW_ERROR_OK
+			rc := C.webview_eval(w, js.str)
+			if rc != 0 {
+				eprintln('vails: a queued webview_eval failed on the window ' +
+					'thread (code ' + rc.str() + ')')
 			}
 		}
 	}
@@ -160,6 +216,11 @@ fn close_sink(w voidptr) fn () {
 // (webview.h does not pull in objbase.h, so the symbol is not available here
 // even though the include below is.)
 const coinit_apartmentthreaded = u32(0x2)
+
+// WM_DESTROY and WM_QUIT are declared by trayicon_windows.c.v's siblings, not
+// here: this file's window-lifetime work is written up in window_thread and is
+// currently REVERTED, so an unused constant would only be a notice in the build
+// output (AGENTS.md §2). They come back with the fix, not before it.
 
 // com_enter puts THIS thread into a single-threaded apartment.
 //
@@ -306,10 +367,11 @@ fn window_thread(j &WindowJob) {
 	// one `webview_run` is about to block in. eval_sink compares against it to
 	// decide between a direct eval and a dispatched one.
 	owner_thread := unsafe { C.GetCurrentThreadId() }
+	parent := unsafe { C.webview_get_window(w) }
 	wctx := Ctx{
 		label:    cfg.label
-		eval_fn:  eval_sink(w, owner_thread)
-		parent:   unsafe { C.webview_get_window(w) }
+		eval_fn:  eval_sink(w, owner_thread, mt, parent)
+		parent:   parent
 		main:     mt
 		close_fn: close_sink(w)
 	}
@@ -321,6 +383,31 @@ fn window_thread(j &WindowJob) {
 		eprintln('webview[' + cfg.label + ']: the main-thread job wakeup is ' +
 			'unavailable: ' + err.msg())
 	}
+	// NO LIFETIME HOOK HERE, and the reason is written down because two attempts
+	// at one were reverted and a third person would otherwise try a third.
+	//
+	// THE DEFECT, measured 2026-10-04 with two windows: closing the FIRST window
+	// while another is still open leaves the process alive forever with no
+	// windows. Closing the SECOND one first exits cleanly. Single-window
+	// `examples/hello` exits cleanly, so it is specific to N > 1. A debugger
+	// attach shows the main thread still inside `webview_run` -> `GetMessageW`
+	// with its window already destroyed, because the library only ends the loop
+	// for the LAST webview torn down in the process.
+	//
+	// WHAT WAS TRIED, both reverted:
+	//   - `webview_terminate(w)` on WM_DESTROY: ends the hang but ALSO takes the
+	//     other window down with it, so closing one window closed both. The
+	//     library's "stop this webview" is coarser than that.
+	//   - `PostThreadMessageW(owner_thread, WM_QUIT, ...)`: same over-correction,
+	//     which is the useful part - it means the surviving window is not being
+	//     closed by the quit at all, so whatever couples the two is downstream of
+	//     the loop and has to be found before a third attempt is worth making.
+	//
+	// The Linux backend already has the shape of the right answer (count the
+	// open windows, quit when the last one goes - webview_linux_shim.h), so the
+	// fix is a Windows last-window rule that does not depend on `webview_run`
+	// returning. That is real work, not a patch, and it is recorded in
+	// tests/e2e_windows/README.md as F0 step 6 rather than left as a comment.
 	win.ctx = wctx
 	win.state = .ready
 	// on_window BEFORE on_ready: an app that installs services in on_ready

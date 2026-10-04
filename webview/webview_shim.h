@@ -21,53 +21,37 @@ static inline webview_error_t vails_webview_bind(webview_t w, const char *name, 
 
 // --- F0: evaluating on a specific window's thread ---
 //
-// `webview_eval` is not callable from a thread that does not own the webview,
-// and with one window per thread (F0) "the thread that owns it" is now a
-// property of the WINDOW, not of whoever happens to be calling. So V never
-// calls webview_eval directly: it hands the library a snippet and a target
-// window through `webview_dispatch`, which the library runs on that window's
-// own thread. Every emit — from a handler, from a worker, from a different
-// window's thread — goes through here, which is what makes the routing rules
-// in window.v sufficient on their own.
+// `webview_eval` is only valid on the thread that owns the webview, and with one
+// window per thread (F0) "the thread that owns it" is a property of the WINDOW,
+// not of whoever happens to be calling. So V never calls webview_eval off the
+// owning thread. It used to reach the owning thread through the library's
+// `webview_dispatch`, and that was wrong twice over, both times measured:
 //
-// The job carries DATA, not a V function pointer: a `void*` to a struct the
-// caller allocated. That keeps every V closure out of C (AGENTS.md §2), and
-// it means the snippet is copied on the calling thread rather than borrowed —
-// the Ctx's JS string is a temporary that would otherwise be freed before the
-// target thread ever looked at it.
+//  1. `webview_dispatch` returns a webview_error_t, NOT a bool, and success is
+//     `>= 0` with WEBVIEW_ERROR_OK == 0. So `if (!webview_dispatch(...))` takes
+//     the failure branch ON SUCCESS - it freed the job the window thread was
+//     about to run (a use-after-free) and then reported the emit as refused.
+//     Nothing in the single-window era hit this, because nothing dispatched.
 //
-// The job is freed HERE, on the webview's thread, and only on the paths where
-// dispatch did not take ownership of it. A strdup failure frees both.
-typedef struct {
-	webview_t w;
-	char *js;
-} vails_eval_job;
+//  2. With the check corrected, the dispatch itself crashed: 0xC0000005, access
+//     violation, faulting module `libwebview-0.12.dll`, thrown from inside the
+//     library on the CALLING thread. `webview_dispatch` needs a COM apartment
+//     where it is called, and post_to_main's caller is by definition a spawn()ed
+//     worker (ADR-0010), which has no apartment at all. This is the same
+//     measured wall com_enter documents for window CREATION - the fix there gave
+//     each window's thread an apartment, and it fixed that, but the dispatch
+//     path needs one on the CALLER's side and nobody had gone looking.
+//
+// So there is no dispatch here. The cross-thread eval goes through post_to_main
+// (jobs.v), which is pure Win32 - a queue plus a PostMessage to a comctl32
+// subclass - and therefore needs no apartment from either thread. It is also
+// already proven on Windows with an E2E screenshot (ADR-0019), which is a
+// stronger claim than "compiles".
+//
+// The snippet is COPIED into the job closure on the calling thread, which is
+// what makes that safe: the Ctx's JS string is a temporary that would otherwise
+// be freed long before the window thread looked at it.
 
-static void vails_eval_run(void *arg) {
-	vails_eval_job *job = (vails_eval_job *)arg;
-	(void)webview_eval(job->w, job->js);
-	free(job->js);
-	free(job);
-}
-
-static inline int vails_eval_dispatch(webview_t w, const char *js) {
-	vails_eval_job *job = (vails_eval_job *)malloc(sizeof(vails_eval_job));
-	if (job == NULL) {
-		return 0;
-	}
-	job->w = w;
-	job->js = strdup(js);
-	if (job->js == NULL) {
-		free(job);
-		return 0;
-	}
-	if (!webview_dispatch(w, vails_eval_run, job)) {
-		free(job->js);
-		free(job);
-		return 0;
-	}
-	return 1;
-}
 
 // vails_webview_terminate makes a running webview_run return, which is how a
 // window is closed from another thread (an app quitting N windows, or one

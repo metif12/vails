@@ -63,6 +63,33 @@ Conventions for this file:
 
 ### Fixed
 
+- **`emit_to` across windows no longer crashes the process or lie about
+  succeeding** (F0, found by running `examples/multiwindow` on 2026-10-04 — two
+  defects that had shipped since 2026-09-30 behind a green `v vet`):
+  - `webview_dispatch` returns a `webview_error_t`, not a bool. `WEBVIEW_ERROR_OK`
+    is `0` and success is `>= 0`, so the shipped `if (!webview_dispatch(...))`
+    took the **failure branch on success** — freeing the job the window thread
+    was about to run (a use-after-free) and then reporting a healthy window as
+    refusing the emit. Visible symptom: every cross-window emit failed with
+    "could not hand a snippet to this window from another thread".
+  - With that corrected it still crashed: `0xC0000005` **inside
+    `libwebview-0.12.dll`**, because the call needs a COM apartment on the
+    **calling** thread and every caller is a `spawn`ed worker, which has none.
+    The cross-thread path now goes through `post_to_main` (queue + `PostMessage`,
+    pure Win32, already proven by ADR-0019) instead. The owner-thread path still
+    evaluates directly, so an emit from a command handler still has taken effect
+    by the time the handler returns.
+  - `buildplan/dispatch_test.v` guards both, because no unit test can reach C.
+    It is verified red on a reintroduced call — naming the file and line — and
+    green after, which is the only way a guard is known to guard.
+- **Known, NOT fixed, and recorded rather than papered over**: closing the
+  *first* of several windows while another is still open leaves the process
+  running with no windows. Closing the second one first exits cleanly, and
+  single-window apps exit cleanly, so it is specific to N > 1 and
+  order-dependent. `tests/e2e_windows/README.md` (F0, step 6) carries the
+  measurement, the debugger backtrace, and the two fixes that were tried and
+  reverted.
+
 - `dialog.open({ folder: true })` rejects `filters` combinations that could not be
   honoured instead of ignoring them.
 

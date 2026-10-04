@@ -7,21 +7,35 @@ current position, then what has shipped, then the priority table that decides
 what happens next. Anything about *why* something took three attempts belongs in
 an ADR, not here.
 
-## Where we are (2026-09-30)
+## Where we are (2026-10-04)
 
 | | |
 |---|---|
-| `v test .` on Windows | **33/33 test files green**, excluding `webview` (below). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1c |
+| `v test .` on Windows | **37/37 test files green**, excluding `webview` (below). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. Re-measured 2026-10-04 across all 16 non-webview modules. |
 | `v test webview` on Windows | **cannot be run**: it takes the host down. Measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with **no OOM in the Windows event log**. All six `webview` test files *compile* (`v -o`, no run). |
 | `v test .` on Linux | 32/32 as of 2026-09-28. **Stale**: not re-measured since ADR-0034/0035, and this repo does not have a Linux runner. Treat as "was green", not "is green". |
 | Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
-| Next by the table | **F0's proof run** (one command: `examples/multiwindow`), then F1, then W1–W4 |
-| Runtime-blocked on | a two-window run on Windows (F0), a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
+| Next by the table | **F0's proof run is DONE** (below). Next: **one green `ci.yml` run**, then F1, then W1–W4 |
+| Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6), and **a `ci.yml` that has never reported a green job** |
 
-**Three V 0.5.2 bugs are now pinned in `AGENTS.md §2b` + `§2c`** and they are not
+**F0 is proven on Windows.** `examples/multiwindow` with
+`VAILS_MULTIWINDOW_PROBE=pings` brings up two windows, each showing its own label
+badge from one shared document, and each inbox lists a ping **from the other
+window** while its own status line stays empty. The run found **two shipped bugs
+that `v vet` could not see** — a `webview_dispatch` return value read backwards
+(its success code is `0`), and then, with that fixed, an access violation
+*inside* `libwebview-0.12.dll` because the call needs a COM apartment on the
+**calling** thread and every caller is a `spawn`ed worker. Both are fixed, both
+are guarded, and the cross-thread path now uses the already-proven
+`post_to_main`. This is the argument for running the thing rather than
+type-checking it.
+
+**Five V 0.5.2 bugs are now pinned in `AGENTS.md §2b` + `§2c`** and they are not
 exotic: two `if`/`$d` parser bugs, `or` silently not running for a none
-`Option<&T>`, a closure copying a `mut … &T` *parameter* by value, and `spawn`
-with a `mut … &T` parameter crashing or hanging. Any threading or optional-value
+`Option<&T>`, a closure copying a `mut … &T` *parameter* by value, `spawn`
+with a `mut … &T` parameter crashing or hanging, and — found by the F0 run — two
+closure-literal parse errors that both report `unexpected token }` pointing at a
+brace several frames from the mistake. Any threading or optional-value
 code in this repo should read §2c before it is written.
 
 ## What has shipped
@@ -128,7 +142,7 @@ Effort is in focused days and is an estimate, not a commitment.
 | 5 | B0 | **B1** runnable `vails build` | 3 d | P1, B2–B4 | 5 DLLs are copied by nobody today; a green CI must not ship a dead `.exe` | **done (ADR-0034)** |
 | 6 | B0 | **B2+B3** Dockerfile + matrix CI | 4 d | P2–P4, B4 | the repo has no CI; `v test .` is green on both platforms already | **done, unproven (ADR-0034)** — no runner or container here |
 | 7 | — | **U0/W0** `post_to_main` | 3 d | U4–U7, W1–W4 | three dependents; also the job half of ADR-0019 (its subscriber half shipped as ADR-0023) | **done on Windows (ADR-0019)** — `jobs.v` + a real E2E screenshot; Linux `g_idle_add` deferred |
-| 8 | — | **F0** multi-window | 6 d | **W**, `tray.set_menu`, U4's second window | highest-leverage single item; reopens an ADR-0020 decision | **routing done, window blocked (ADR-0035)** — 21 tests; the second Windows window needs `CoInitializeEx` on the window thread |
+| 8 | — | **F0** multi-window | 6 d | **W**, `tray.set_menu`, U4's second window | highest-leverage single item; reopens an ADR-0020 decision | **done, PROVEN on Windows (ADR-0035, 2026-10-04)** — 21 routing tests + a real two-window run that found two shipped bugs (`webview_dispatch` success read as failure, then an access violation inside the DLL); Linux structurally done, unrun |
 | 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | planned |
 | 10 | U0 | **W1–W4** chrome + `window` service | 6 d | the tutorial's menu item, E6 | absorbs S1 wave-4 `window-state`/`positioner` | planned |
 | 11 | W, F0 | **U1–U4** updater core + service | 8 d | U5, P4 | the manifest-as-core half is pure V and no I/O | planned |
@@ -975,8 +989,10 @@ The answer came down to **two rows** — the only two gaps that are capabilities
 of the *shell* rather than missing services. Every other row is an S2 service,
 a small platform nicety, or a non-goal with a reason attached.
 
-- [ ] **F0 — multi-window** (ADR-0035, landed in part 2026-09-30): the hard
-  half is **done**, the window half is **written but unobserved**.
+- [ ] **F0 — multi-window** (ADR-0035, routed 2026-09-30, **PROVEN on Windows
+  2026-10-04 — routing and the cross-thread emit; window teardown is NOT**): the
+  hard half is done, the window half is done **and observed**, and one
+  order-dependent teardown defect is open.
   `webview/window.v`
   has `Window`, `WindowRegistry` and `emit_to`, and `window_test.v` (21 tests)
   proves with two fake eval sinks that an event addressed to one window never
@@ -989,41 +1005,81 @@ a small platform nicety, or a non-goal with a reason attached.
     wrong"**, and it is now pinned by tests rather than by convention: the old
     shape (`ctx.emit` through one Ctx) could not be tested for it at all,
     because with one window there is no wrong window to reach.
-  - **The window half is written; nobody has watched it work.** WebView2 binds
-    the HWND, the COM apartment and the message pump to the thread that called
-    `webview_create`, and `webview_run` blocks in that pump — so a second window
-    needs a second thread, and a `spawn`ed thread has **no apartment at all**:
-    measured, the second window *appears*, `webview_run` starts, and then the
-    library **refuses a `webview_dispatch` to it**, after which the process
-    dies. That is why the code used to refuse more than one window by name.
-    `com_enter` in `webview_windows.c.v` now calls `CoInitializeEx(NULL,
-    COINIT_APARTMENTTHREADED)` on each window's own thread before
-    `webview_create`, and `CoUninitialize` after `webview_destroy`, and the
-    refusal is gone. `com_enter`'s return value is what makes the third case
-    honest: `RPC_E_CHANGED_MODE` means the apartment is **not** ours, so
-    `com_leave` only balances when `>= 0`.
-  - **So what is left is one run, and it is not optional bookkeeping.**
-    `v vet webview` is green and `v fmt -l .` is clean, but this machine
-    **crashes its host on the `webview` test module**, so the two-window run
-    never happened here. `examples/multiwindow` with
-    `VAILS_MULTIWINDOW_PROBE=pings` is the run that settles it, and a
-    screenshot of both windows in `tests/e2e_windows/` is what turns ADR-0035
-    from a claim into a record. Until then this item stays **unchecked**,
-    which is the repo's own rule (AGENTS.md §5) rather than a judgement call.
+  - **The window half is now observed, and the run found two bugs that no amount
+    of type-checking could have.** Both were in the cross-thread emit, and both
+    had been shipped since 2026-09-30 behind a green `v vet`:
+    1. **`webview_dispatch`'s return value was read backwards.** It returns a
+       `webview_error_t`, not a bool: `WEBVIEW_ERROR_OK` is **0** and success is
+       `>= 0`. The code did `if (!webview_dispatch(...)) { free the job; fail }`,
+       so the FAILURE branch ran ON SUCCESS — freeing the job the window thread
+       was about to execute (a use-after-free) and then reporting a healthy
+       window as refusing the emit.
+    2. **With that fixed, the dispatch crashed anyway**: `0xC0000005`, access
+       violation, faulting module **`libwebview-0.12.dll`**, thrown from inside
+       the library on the CALLING thread. It needs a COM apartment where it is
+       called, and every caller here is a `spawn`ed worker, which has none —
+       which is the same wall `com_enter` documents for window *creation*, one
+       level of indirection away and therefore missed. `com_enter` fixed the
+       window's thread and said nothing about the caller's.
+
+    The cross-thread path now goes through **`post_to_main`** (jobs.v): pure
+    Win32, a queue plus a `PostMessage` to a comctl32 subclass, so it needs no
+    apartment from either thread — and already screenshot-proven by ADR-0019.
+    The owner-thread path still calls `webview_eval` directly, because services
+    depend on an emit from a handler having taken effect by the time the handler
+    returns.
+  - **The proof, on Windows, 2026-10-04** — `examples/multiwindow` with
+    `VAILS_MULTIWINDOW_PROBE=pings`, both windows captured with `PrintWindow`
+    (window content only, so no desktop leaks into the frame):
+    - two windows come up, each with **its own label badge** — `main` and
+      `settings` — from one document, so per-window runtime injection works;
+    - the `settings` window's inbox reads **`pinged by main (I am settings)`**
+      and the `main` window's reads **`pinged by settings (I am main)`**, so both
+      directions route correctly;
+    - both windows list the broadcast;
+    - **and neither sender's own status line moved** ("no result yet"), which is
+      the negative half: a routing bug would echo the event back to the sender,
+      and there is no echo.
+    - Four runs, four `webview_eval` successes each, empty stderr.
+    - **Step 6 is still BROKEN and is not claimed as fixed**: closing the FIRST
+      window while another is open leaves the process alive with no windows at
+      all, reproducibly, while closing the second one first exits cleanly and
+      single-window `examples/hello` exits cleanly. A debugger attach shows the
+      main thread still in `webview_run` → `GetMessageW` with its window already
+      destroyed — the library only ends the loop for the LAST webview torn down
+      in the process. Two fixes were tried and **reverted**
+      (`webview_terminate`, then `PostThreadMessageW`); both ended the hang by
+      closing the *other* window too, which is worse. The order-dependence is
+      the finding: the fix is a Windows last-window rule, the shape Linux
+      already has in `webview_linux_shim.h`, and it cannot treat "`webview_run`
+      returned" as the liveness signal. Step 5 (close one, the other survives)
+      does pass.
+  - **`buildplan/dispatch_test.v` guards both bugs**, textually, because no unit
+    test can reach C: no `webview_dispatch` call anywhere in `webview/`, and no
+    `if (!C.webview…)` negation of a zero-is-success error code. It lives in
+    `buildplan` rather than `webview` because `v test webview` takes this host
+    down, and a guard nobody can run is the "passes because its subject is
+    missing" failure `buildplan/workflow_test.v` already refuses. Verified the
+    only way a guard can be trusted: **red** on a reintroduced call, naming the
+    file and line, then green.
   - **Linux is structurally done** — GTK is one process-wide main loop with any
     number of GtkWindows in it, so `webview_linux_shim.h` counts open windows
     and quits the loop when the last one closes (the single-window version
     called `gtk_main_quit` unconditionally, which is "closing the settings window
     quits the app" with two). Not run in a real session from this machine.
-  - **Three V 0.5.2 bugs were found and measured getting here** and are recorded
-    in AGENTS.md §2c: `or` does not run for a none `Option<&T>` (which made a
+  - **Five V 0.5.2 bugs were found and measured getting here** and are recorded
+    in AGENTS.md §2b/§2c: `or` does not run for a none `Option<&T>` (which made a
     lookup report that it had found something); a closure copies a `mut … &T`
-    *parameter* by value; and `spawn` with a `mut … &T` parameter crashes or
-    hangs. The last two are the same root cause, and the workaround for all
-    three is a plain reference plus `unsafe`. Also found by a test written while
-    landing this: **`jsesc.escape` does not escape `"`**, so a window label
-    wrapped in double quotes was a script injection into every page — the label
-    is now single-quoted and there are three escaping tests.
+    *parameter* by value; `spawn` with a `mut … &T` parameter crashes or hangs;
+    **a closure literal with a capture list and no explicit signature does not
+    parse as a return expression**, and a closure literal passed to a call that is
+    followed by `or` is parsed as the anonymous function's return type. The second
+    pair cost the most, because both report `unexpected token }` pointing at a
+    closing brace several frames from the actual mistake. The workaround for all
+    five is a plain reference plus `unsafe`, or an explicit signature. Also found
+    by a test written while landing this: **`jsesc.escape` does not escape `"`**,
+    so a window label wrapped in double quotes was a script injection into every
+    page — the label is now single-quoted and there are three escaping tests.
 - [ ] **F1 — drag & drop**, the other row, and the `drop` service (ADR-0036,
   landed 2026-10-03): Wails ships `drag-n-drop`, Tauri ships `drag`, Vails had
   nothing, and for any app whose user has files on disk a window that will not

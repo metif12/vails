@@ -128,10 +128,12 @@ does. `v mcp serve` needs the built compiler, so it is not available here yet.
 - Prefer small pure-V modules with `_test.v` over clever code.
 - New native capability = new file under `services/` + test + ADR entry.
 
-### 2b. Four V 0.5.2 constructs that do not compile
+### 2b. Six V 0.5.2 constructs that do not compile
 
-All four were found the hard way while landing ADR-0034. Each one's error
-message points somewhere other than the offending line, so they are listed
+The first four were found the hard way while landing ADR-0034; the last two were
+found on 2026-10-04 while fixing F0's cross-thread emit, and both were measured
+in a standalone file with no Vails code before being worked around. Each one's
+error message points somewhere other than the offending line, so they are listed
 here rather than left to be rediscovered.
 
 - **`if x := f(); cond {` is a parse error** — and so is `if x := f() {`,
@@ -167,6 +169,27 @@ here rather than left to be rediscovered.
 - **A closure cannot capture a local without declaring it.** A captured
   name must be listed as inherited. When that gets in the way, take the
   value as a function argument instead (see `sqlreg.bind_report`).
+
+- **A closure literal with a capture list and NO explicit signature does not
+  parse as a `return` expression.** `return fn [js] { … }` is a parse error;
+  `return fn [js] () { … }` compiles. Measured in a standalone file with no
+  Vails code, so it is the compiler and not this repository. The message is
+  `invalid expression: unexpected token }` pointing at the **enclosing
+  function's** closing brace — three braces away from the actual mistake — so
+  budget for reading the wrong line. `webview/eval_job` is the worked example;
+  it takes `fn [w, js] ()`. **Always write the signature.**
+
+- **A closure literal passed as an ARGUMENT to a call that is followed by `or`
+  is parsed as that anonymous function's return type.** The error names it
+  outright — `expected return type, not `or` for anonymous function` — which is
+  more helpful than the one above, but the fix is the same shape: hoist the
+  closure into a named binding first, or into a function that returns it.
+
+  ```v
+  post_to_main(ctx, fn [w, js] { … }) or { … }   // parse error
+  job := eval_job(w, js)                          // eval_job returns the closure
+  post_to_main(ctx, job) or { … }                 // parses
+  ```
 
 ### 2c. Two V 0.5.2 bugs that COMPILE and then lie
 

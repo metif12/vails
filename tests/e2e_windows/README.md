@@ -424,24 +424,76 @@ after each:
    and check that the window really owns the foreground before capturing; a
    retried raise loop alone is not enough if the raise happens too early.
 
-## F0 — two windows on Windows (ADR-0035) — **unproven, and this is the run that settles it**
+## F0 — two windows on Windows (ADR-0035) — steps 1–4 **PROVEN** 2026-10-04; step 6 is a **known defect**
 
-This is the one outstanding item in the whole Windows list, and it is not a
-routine check: **nobody has watched two windows open on this platform.** The
-routing rules are proven by `webview/window_test.v` (two fake eval sinks, no
-window), and the backend now gives every window's thread its own COM apartment
-(`com_enter` in `webview/webview_windows.c.v`) before `webview_create` — but
-that fix has only been type-checked. It has not been run. The machine this was
-written on crashes its host on the `webview` test module, so the run never
-happened there.
+**Result of the run, and it found two shipped bugs.** `examples/multiwindow`
+with `VAILS_MULTIWINDOW_PROBE=pings` now passes steps 1–4 with both windows
+captured. Along the way it turned up two defects that had been in the tree since
+2026-09-30 behind a green `v vet` and a clean `v fmt`, both in the cross-thread
+emit, and both now fixed and guarded by `buildplan/dispatch_test.v`:
 
-What the fix is for, because "it did not work" is not a reason: WebView2 binds
-the HWND, the COM apartment and the message pump to the thread that created the
-window, and `webview_run` blocks per instance — so window 2 needs its own
-thread, and a `spawn`ed thread has **no apartment**. The measured symptom
-without the fix is nasty: the second window *appears*, its page renders, and
-then the library refuses the first `webview_dispatch` to it and the process
-dies. That is why the code used to refuse a second window by name.
+1. **`webview_dispatch`'s result was read backwards.** It returns a
+   `webview_error_t`, not a bool — `WEBVIEW_ERROR_OK` is **0** and success is
+   `>= 0`. The code was `if (!webview_dispatch(...)) { free the job; fail }`, so
+   the failure branch ran **on success**: it freed the job the window thread was
+   about to execute (a use-after-free) and then reported a healthy window as
+   refusing the emit.
+2. **Fixed, the dispatch crashed anyway** — `0xC0000005`, faulting module
+   **`libwebview-0.12.dll`**, thrown inside the library on the **calling**
+   thread. It needs a COM apartment where it is called and every caller here is
+   a `spawn`ed worker, which has none. `com_enter` gives each window's thread an
+   apartment and fixed window *creation*; it says nothing about the caller.
+
+The cross-thread path now uses **`post_to_main`** (a queue plus a `PostMessage`
+to a comctl32 subclass): pure Win32, needs no apartment from either thread, and
+already screenshot-proven by ADR-0019. The owner-thread path still calls
+`webview_eval` directly, because services depend on an emit from a handler
+having taken effect by the time the handler returns.
+
+**What the proof showed** (both windows captured with `PrintWindow`, which
+renders window content only — `CopyFromScreen` frames whatever is behind the
+window, and this repository purged desktop-leaking screenshots from its history
+once already):
+
+| claim | evidence |
+|---|---|
+| two windows, one document | both titled `Vails Multiwindow - main` / `- settings` |
+| per-window runtime injection | each badge shows **its own** label |
+| routing, forward | `settings` inbox: `pinged by main (I am settings)` |
+| routing, reverse | `main` inbox: `pinged by settings (I am main)` |
+| broadcast | both inboxes list it |
+| **no echo** (the negative half) | **neither** sender's status line moved — still `no result yet` |
+
+Four runs: four `webview_eval` successes each, empty stderr.
+
+### Step 6 is a real, open defect — do not record it as passing
+
+Closing a window leaves the process running with **no windows**, reproducibly:
+
+| what you close | result |
+|---|---|
+| the **second** window first | exits cleanly |
+| the **first** window first | **hangs forever**, 0 windows, ~5 threads |
+| single-window `examples/hello` | exits cleanly |
+
+So it is specific to N > 1 and it is **order-dependent**, which is the useful
+part. A debugger attach shows the main thread still inside `webview_run` →
+`GetMessageW` with its window already destroyed and no `WM_QUIT` in its queue:
+the library only ends the loop for the **last** webview torn down in the
+process. `run_windows` then waits forever for a token no thread will send.
+
+**Two fixes were tried and reverted**, recorded so a third attempt starts from
+the measurement rather than from scratch:
+
+- `webview_terminate(w)` on `WM_DESTROY` — ends the hang, but closing one window
+  then takes the **other** one down too.
+- `PostThreadMessageW(owner_thread, WM_QUIT, …)` — same over-correction, and that
+  is the informative part: the surviving window is *not* being closed by the
+  quit, so whatever couples the two is downstream of the loop.
+
+The right shape is the one Linux already has: a Windows **last-window rule** that
+does not treat "`webview_run` returned" as the liveness signal, because it is not
+one. That is real work, not a patch.
 
 ```powershell
 $env:VAILS_MULTIWINDOW_PROBE = "pings"
@@ -451,18 +503,16 @@ Copy-Item examples\multiwindow\frontend\index.html .
 Copy-Item examples\multiwindow\vails.json .
 .\multiwindow.exe
 # 1. TWO windows come up, not one. This is the whole claim: window 2 lives on a
-#    second thread with its own STA.
+#    second thread with its own STA.                                    [PROVEN]
 # 2. each window's badge shows its OWN label (main / settings) - the per-window
-#    runtime injection, so one document can tell the two pages apart
+#    runtime injection, so one document can tell the two pages apart    [PROVEN]
 # 3. ~2s in, the "settings" window's inbox lists a ping FROM "main", and the
 #    "main" window's inbox lists a ping FROM "settings". The RECEIVER's inbox is
-#    the evidence; the sender only ever says "sent"
-# 4. both inboxes then list the broadcast. If routing had collapsed to "one
-#    window", broadcast is what notices
-# 5. close ONE window -> the other stays up and stays interactive. This is
-#    webview_linux_shim.h's last-window rule's Windows counterpart and the
-#    reason `stop_all` exists
-# 6. close both -> the process exits on its own, no orphan thread
+#    the evidence; the sender only ever says "sent"                     [PROVEN]
+# 4. both inboxes then list the broadcast, and NEITHER sender's own line moved
+#                                                                     [PROVEN]
+# 5. close ONE window -> the other stays up and stays interactive     [PROVEN]
+# 6. close both -> the process exits on its own, no orphan thread    [FAILS today]
 ```
 
 **What counts as passing:** steps 1–4, with a screenshot showing **both**
@@ -470,7 +520,7 @@ windows at once. Two separate screenshots do not prove the claim — the failure
 mode is one window rendering perfectly while the other is dead, which is exactly
 what two separate shots would hide.
 
-**What to do if it dies at step 1 with no second window:** that is the pre-fix
+**What to do if it dies at step 1 with no second window:** that is the pre-`com_enter`
 symptom and it means the apartment is not taking. Check the stderr for
 `webview[settings]:` — `com_enter`'s return value is not logged today, and
 logging it (S_OK / S_FALSE / RPC_E_CHANGED_MODE) is the first thing to add if
