@@ -31,6 +31,7 @@ pub fn supports() []ServiceStatus {
 	return [
 		dialog_support(),
 		notification_support(),
+		balloon_support(),
 		menu_support(),
 		tray_support(),
 		clipboard_support(),

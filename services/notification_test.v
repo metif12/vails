@@ -262,20 +262,36 @@ fn test_support_agrees_with_what_the_machine_can_actually_do() {
 	s := notification_support()
 	assert s.name == 'notification'
 	$if windows {
-		assert s.ready == toast_available(), 'notification_support().ready must ' +
-			'be the machine probe (toast_available), never a hardcoded true'
+		// The invariant, expressed in terms of the reason rather than a bool:
+		// `ready` must mean "the probe found nothing wrong". Stated as
+		// `toast_available()` it also held, but that let a second probe of the
+		// same fact exist and drift; ADR-0039 replaced the bool with the
+		// reason code precisely so this line has something to say.
+		assert s.ready == (toast_failure_reason() == toast_reason_ok), 'notification_support().ready must be the machine probe ' +
+			'(toast_failure_reason), never a hardcoded true'
 		// Whichever way it went, the note has to explain itself - a stub without a
 		// reason is useless in a doctor report, and support_test.v's invariant
 		// already requires one but not that it is *useful*.
 		if !s.ready {
-			assert s.note.contains('REGDB_E_CLASSNOTREG') || s.note.contains('do not activate')
+			// And the useful part is specifically that it carries the *cause*:
+			// the note is the mapped sentence for this machine's reason code,
+			// verbatim. That is the invariant that stops `doctor` from naming
+			// the wrong repair - it failed before by naming the AUMID on a
+			// machine whose Windows had no WinRT at all.
+			assert s.note.contains(toast_failure_note(toast_failure_reason()))
 			// And the compile-time answer must not have been dragged along with it:
 			// the backend IS in the build, and saying otherwise would send a reader
 			// looking for a missing dependency that is not missing.
 			assert is_supported()
+			assert s.note.contains('built in')
 		}
 	} $else {
+		// No WinRT here, so no toast - and the note has to say so for the same
+		// reason the Windows branch demands a cause: `doctor` is read on Linux
+		// too, and "no backend on this platform" with no reason is the stub
+		// this whole service was written to avoid.
 		assert !s.ready
+		assert s.note.contains(toast_failure_note(toast_reason_other_platform))
 	}
 }
 
@@ -352,4 +368,282 @@ fn test_install_denies_an_ungranted_command() {
 		notify_grant(['notification.is_supported']))
 	assert res.err.starts_with('forbidden:')
 	assert res.err.contains('notification.notify')
+}
+
+// ## toast_failure_note: the mapping is the testable half of the probe
+//
+// The registry probe itself is C and `v test` cannot reach it (ADR-0039). What
+// can be tested - exhaustively - is that every reason code the C half can
+// return produces a distinct, actionable sentence. A new code added on the C
+// side without a V branch would otherwise show up as a bare "unrecognised code"
+// string in `vails doctor`, which is exactly the unhelpful output this work
+// set out to remove.
+
+fn test_toast_failure_note_covers_every_reason_code() {
+	// ok is not a failure: an empty note, so a caller can concatenate it
+	// unconditionally.
+	assert toast_failure_note(toast_reason_ok) == ''
+	// Each real code must say something, and must not echo the raw code back -
+	// the point is that a reader gets a sentence, not a token.
+	codes := [
+		toast_reason_no_class_store,
+		toast_reason_not_registered,
+		toast_reason_activate_failed,
+		toast_reason_init_failed,
+		toast_reason_other_platform,
+	]
+	mut seen := map[string]bool{}
+	for code in codes {
+		note := toast_failure_note(code)
+		assert note.len > 40, 'code "${code}" produced a stub note: ${note}'
+		assert !note.contains(code), 'note for "${code}" leaks the raw code'
+		assert !(note in seen), 'two codes produced the same note'
+		seen[note] = true
+	}
+}
+
+fn test_toast_failure_note_names_the_missing_store_and_the_repair() {
+	note := toast_failure_note(toast_reason_no_class_store)
+	// The measured cause, stated exactly: not "the toast failed", but which
+	// registry branch is gone.
+	assert note.contains('ActivatableClasses')
+	// The repair, because a diagnosis a reader cannot act on is half a note.
+	assert note.contains('RestoreHealth')
+	assert note.contains('sfc /scannow')
+	// And the correction of the natural misdiagnosis: this is not an identity
+	// problem, and telling a reader to check bundle.identifier here is what
+	// this note exists to stop them doing.
+	assert note.contains('not a Vails bug')
+	assert note.contains('AppUserModelID')
+}
+
+fn test_toast_failure_note_distinguishes_a_wrong_identity() {
+	// The two REGDB_E_CLASSNOTREG cases must not read alike: one is a broken
+	// Windows image, the other is a partial install.
+	debloated := toast_failure_note(toast_reason_no_class_store)
+	partial := toast_failure_note(toast_reason_not_registered)
+	assert debloated != partial
+	assert partial.contains('RestoreHealth')
+	// A missing AUMID does NOT produce the registration HRESULT, so this note
+	// must not send the reader to bundle.identifier.
+	assert !partial.contains('bundle.identifier')
+}
+
+fn test_toast_failure_note_reports_an_unknown_code_verbatim() {
+	// A code the C half learned and this half did not: report it rather than
+	// invent a diagnosis. Guessing here is how a wrong repair gets suggested.
+	note := toast_failure_note('something-new')
+	assert note.contains('something-new')
+	assert note.contains('does not recognise')
+}
+
+// ## Toast action buttons: built, tested, not sent (ADR-0039)
+//
+// The decision under test is a negative one - the service must NOT put buttons
+// on the wire - so the tests are shaped around the gate rather than around the
+// builder. Both halves are pinned: the builder because it is the code that has
+// to be right when the gate opens, and the gate because until it opens the
+// builder is unreachable and therefore untested by anything else.
+
+fn test_toast_xml_omits_actions_while_the_capability_is_false() {
+	opts := NotificationOptions{
+		title:   'Build finished'
+		body:    '2 errors'
+		actions: [
+			NotificationAction{ id: 'open', content: 'Open' },
+		]
+	}
+	xml := toast_xml(opts)
+	// The gate is what makes this pass today.
+	assert !toast_actions_available
+	assert !xml.contains('<actions>')
+	// And the rest of the document is intact - a gate must not quietly break the
+	// toast it is gating.
+	assert xml.contains('<text>Build finished</text>')
+	assert xml.contains('<text>2 errors</text>')
+	assert xml.starts_with('<toast ')
+	assert xml.ends_with('</toast>')
+}
+
+fn test_actions_element_has_the_schema_nesting() {
+	// <actions> is a child of <toast> and a SIBLING of <visual>, after it. Putting
+	// it inside the binding, or before the visual, produces a document the shell
+	// refuses to parse - and the symptom is that no notification appears at all,
+	// which points nowhere near the cause.
+	mut el := toast_actions_element([NotificationAction{
+		id:        'open'
+		content:   'Open'
+		arguments: 'open:1'
+	}])
+	assert el.starts_with('<actions>')
+	assert el.ends_with('</actions>')
+	assert el.contains('content="Open"')
+	assert el.contains('arguments="open:1"')
+	// self-closing, which is how the schema wants a button with no children
+	assert el.contains('/>')
+	assert el.contains('placement="contextual"')
+	// and no <visual> leaked in
+	assert !el.contains('<visual')
+}
+
+// The placement vocabulary, including the default. `system` is accepted by the
+// schema but not what a desktop app wants, so the default is what a caller gets
+// without asking.
+fn test_action_placement_defaults_and_vocabulary() {
+	a := NotificationAction{ id: 'x', content: 'X' }
+	assert a.placement == ''
+	assert effective_placement(a) == action_placement_contextual
+	mut el := toast_actions_element([a])
+	assert el.contains('placement="contextual"')
+	// Both spellings round-trip into the document.
+	el = toast_actions_element([NotificationAction{
+		id:        'x'
+		content:   'X'
+		placement: action_placement_system
+	}])
+	assert el.contains('placement="system"')
+}
+
+// Attribute values are escaped, which `<text>` content does not strictly need.
+// An unescaped quote here ends the attribute and turns the rest of the document
+// into markup - a failure that shows up as a vanished notification.
+fn test_action_attributes_are_escaped() {
+	mut el := toast_actions_element([NotificationAction{
+		id:        'x'
+		content:   'Say "hi"'
+		arguments: 'a&b<c>'
+	}])
+	assert el.contains('&quot;')
+	assert el.contains('&amp;')
+	assert el.contains('&lt;')
+	assert !el.contains('content="Say "hi""')
+	// And the escape cannot be defeated by the label itself forging a tag.
+	el = toast_actions_element([NotificationAction{ id: 'x', content: '<b>bold</b>' }])
+	assert el.contains('&lt;b&gt;')
+	assert !el.contains('<b>')
+}
+
+fn test_validate_notification_actions_bounds() {
+	mut failed := ''
+	validate_notification_actions([]) or { failed = err.msg() }
+	assert failed == ''
+	// too many
+	failed = ''
+	mut many := []NotificationAction{}
+	for i in 0 .. (max_notification_actions + 1) {
+		many << NotificationAction{ id: 'a' + i.str(), content: 'c' }
+	}
+	validate_notification_actions(many) or { failed = err.msg() }
+	assert failed.contains('at most')
+}
+
+fn test_validate_notification_actions_requires_id_and_content() {
+	mut failed := ''
+	validate_notification_actions([NotificationAction{ id: '', content: 'Open' }]) or {
+		failed = err.msg()
+	}
+	assert failed.contains('needs an id')
+	failed = ''
+	validate_notification_actions([NotificationAction{ id: 'open', content: '  ' }]) or {
+		failed = err.msg()
+	}
+	assert failed.contains('content')
+}
+
+fn test_validate_notification_actions_refuses_duplicate_ids() {
+	// The id is what a delivered click is matched against, so two buttons sharing
+	// one makes the returned event ambiguous - which is precisely the delivery
+	// this feature exists for.
+	mut failed := ''
+	validate_notification_actions([
+		NotificationAction{ id: 'open', content: 'Open' },
+		NotificationAction{ id: 'open', content: 'Reopen' },
+	]) or { failed = err.msg() }
+	assert failed.contains('share the id')
+}
+
+fn test_validate_notification_actions_refuses_a_bad_placement() {
+	mut failed := ''
+	validate_notification_actions([NotificationAction{
+		id:        'a'
+		content:   'A'
+		placement: 'inline'
+	}]) or { failed = err.msg() }
+	assert failed.contains('placement')
+}
+
+fn test_actions_survive_the_clamped_copy() {
+	// Today the gate stops them going out, so the only thing that can be wrong
+	// here is the copy silently dropping them - which would be invisible until
+	// the gate opened, i.e. exactly when it would matter.
+	opts := NotificationOptions{
+		title:      't'
+		body:       'b'
+		timeout_ms: 999999
+		actions:    [NotificationAction{ id: 'open', content: 'Open' }]
+	}
+	c := with_clamped_timeout(opts)
+	assert c.timeout_ms == max_timeout
+	assert c.actions.len == 1
+	assert c.actions[0].id == 'open'
+}
+
+fn test_actions_decode_from_json() {
+	mut opts := parse_notify_options('{"body":"b","actions":[{"id":"open","content":"Open"}]}') or {
+		panic(err.msg())
+	}
+	assert opts.actions.len == 1
+	assert opts.actions[0].id == 'open'
+	assert opts.actions[0].content == 'Open'
+	// The field stays zero when the key is absent - which is exactly why the
+	// default lives in effective_placement rather than in the struct.
+	assert opts.actions[0].placement == ''
+	assert effective_placement(opts.actions[0]) == action_placement_contextual
+	assert opts.actions[0].arguments == ''
+	// And an EXPLICIT placement survives decoding.
+	opts = parse_notify_options('{"body":"b","actions":[{"id":"a","content":"A","placement":"system"}]}') or {
+		panic(err.msg())
+	}
+	assert opts.actions[0].placement == 'system'
+	assert effective_placement(opts.actions[0]) == 'system'
+}
+
+fn test_validate_notification_rejects_a_bad_action() {
+	// The actions are validated as part of the whole notification, so there is no
+	// route in that skips it.
+	opts := NotificationOptions{
+		title:   't'
+		body:    'b'
+		actions: [NotificationAction{ id: '', content: 'Open' }]
+	}
+	mut failed := ''
+	validate_notification(opts) or { failed = err.msg() }
+	assert failed.contains('needs an id')
+}
+
+// An unset placement means contextual, and that has to hold for a struct built in
+// V as well as one decoded from JSON. It is a decision rather than a
+// convenience: `placement=""` is not the schema's default to the shell, it is an
+// invalid attribute value, and the validator and the XML builder have to agree on
+// which one they mean - they did not, once, when the struct carried a field
+// default that decoding could overwrite.
+fn test_effective_placement_defaults_an_unset_value() {
+	unset := NotificationAction{ id: 'a', content: 'A' }
+	assert unset.placement == ''
+	assert effective_placement(unset) == action_placement_contextual
+	explicit := NotificationAction{
+		id:        'b'
+		content:   'B'
+		placement: action_placement_system
+	}
+	assert effective_placement(explicit) == action_placement_system
+	// And the XML carries the normalised value, not the empty one.
+	el := toast_actions_element([unset])
+	assert el.contains('placement="contextual"')
+	assert !el.contains('placement=""')
+	// An unset placement is also NOT rejected by the validator - otherwise the
+	// default would be unreachable from the only path a frontend takes.
+	mut failed := ''
+	validate_notification_actions([unset]) or { failed = err.msg() }
+	assert failed == ''
 }

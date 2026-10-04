@@ -3,8 +3,8 @@
 // App: Vails Dialog Demo 0.1.0
 export namespace dialog {
 	export interface DialogFilter { name: string; extensions: string; }
-	export interface DialogOpenOptions { title?: string; defaultPath?: string; filters?: DialogFilter[]; multi?: boolean; }
-	export interface DialogSaveOptions { title?: string; defaultPath?: string; defaultName?: string; filters?: DialogFilter[]; }
+	export interface DialogOpenOptions { title?: string; default_path?: string; filters?: DialogFilter[]; multi?: boolean; folder?: boolean; }
+	export interface DialogSaveOptions { title?: string; default_path?: string; default_name?: string; filters?: DialogFilter[]; }
 	export interface DialogMessageOptions { title?: string; message: string; buttons?: 'ok' | 'okcancel' | 'yesnocancel'; }
 	export interface DialogFileResult { canceled: boolean; paths: string[]; button: string; }
 	export interface DialogMessageResult { canceled: boolean; paths: string[]; button: string; }

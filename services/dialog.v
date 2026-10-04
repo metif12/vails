@@ -64,6 +64,17 @@ pub mut:
 	default_name string
 	filters      []Filter
 	multi        bool
+	// folder turns `open` into a directory chooser. One bool rather than a
+	// `kind`, because it is not a third kind of dialog: it is the same picker
+	// with FOS_PICKFOLDERS, and it returns the same {canceled, paths, button}.
+	//
+	// Deliberately COM and not `Windows.Storage.Pickers`: the Common Item
+	// Dialog already picks files over COM, so folder picking is one flag, and
+	// both keep working on a Windows image whose WinRT has been stripped -
+	// which is not a hypothetical, see ADR-0039. A WinRT picker would inherit
+	// that breakage, need `IInitializeWithWindow` to parent itself to an HWND,
+	// and be a second vocabulary for one job.
+	folder bool
 }
 
 // Result is the JSON a dialog command resolves with. Canceled dialogs
@@ -122,6 +133,20 @@ pub fn (o Options) validate(want string) ! {
 	if !is_button_set(o.buttons) {
 		return error('dialog: buttons must be ok, okcancel or yesnocancel')
 	}
+	// The kind-scoping checks live HERE, above the message early return below -
+	// and that placement is the fix rather than the obvious spot. `message`
+	// returns as soon as its own required field is checked, so anything below
+	// that line is unreachable for a message dialog. `multi` sat below it, which
+	// meant `{"multi":true}` on a message was silently ignored instead of
+	// refused; `folder` would have inherited the same hole (ADR-0039). A flag
+	// that is quietly dropped is worse than one that is refused: the caller
+	// believes it asked for something.
+	if o.multi && o.kind != kind_open {
+		return error('dialog: multi is only valid for kind "open"')
+	}
+	if o.folder && o.kind != kind_open {
+		return error('dialog: folder is only valid for kind "open"')
+	}
 	if o.kind == kind_message {
 		if o.message == '' {
 			return error('dialog: message is required for kind "message"')
@@ -137,8 +162,14 @@ pub fn (o Options) validate(want string) ! {
 	if o.default_name != '' && o.kind == kind_open {
 		return error('dialog: default_name is only valid for kind "save"')
 	}
-	if o.multi && o.kind != kind_open {
-		return error('dialog: multi is only valid for kind "open"')
+	// A filter selects *files*, so it cannot mean anything in folder mode. An
+	// error rather than a silent ignore, because a caller who passed a filter
+	// and got a folder chooser back has been handed a dialog that cannot do
+	// what they asked for and looks like it worked.
+	if o.folder && o.filters.len > 0 {
+		return error('dialog: filters cannot be combined with folder: a filter ' +
+			'selects files, and folder mode selects directories. Drop the filters ' +
+			'to choose a directory')
 	}
 }
 
@@ -373,7 +404,7 @@ pub fn dialog_manifest() Service {
 fn dialog_ts_types() []string {
 	return [
 		'\texport interface DialogFilter { name: string; extensions: string; }',
-		'\texport interface DialogOpenOptions { title?: string; default_path?: string; filters?: DialogFilter[]; multi?: boolean; }',
+		'\texport interface DialogOpenOptions { title?: string; default_path?: string; filters?: DialogFilter[]; multi?: boolean; folder?: boolean; }',
 		'\texport interface DialogSaveOptions { title?: string; default_path?: string; default_name?: string; filters?: DialogFilter[]; }',
 		"\texport interface DialogMessageOptions { title?: string; message: string; buttons?: 'ok' | 'okcancel' | 'yesnocancel'; }",
 		'\texport interface DialogFileResult { canceled: boolean; paths: string[]; button: string; }',

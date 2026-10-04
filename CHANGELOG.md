@@ -20,6 +20,52 @@ Conventions for this file:
 
 ### Added
 
+- **`balloon` service** (ADR-0039): `balloon.show` shows a tray balloon
+  (`Shell_NotifyIconW` with `NIF_INFO`) and resolves with the mechanism that ran,
+  so a frontend can tell a real shell message from a stub. It is a *secondary*
+  service, never a fallback for `notification` - no code path reaches it from
+  there, and `notification` still has no fallback. Its reason to exist: a Windows
+  image whose WinRT class store is stripped cannot activate any WinRT class, so
+  the toast cannot work there at all (see below).
+  `balloon.is_supported` reports whether the platform has a backend. Shipped with
+  a panel in `examples/showcase` (verdict NEEDS YOU) and a section in
+  `examples/services`, both granting `balloon.show`/`balloon.is_supported`.
+- **`examples/showcase` now proves the pair side by side.** A verify run reports
+  `notify FAIL ... REGDB_E_CLASSNOTREG` next to `balloon NEEDS YOU ... reported ok`
+  on a Windows whose WinRT is stripped, which is the clearest statement of
+  ADR-0039's reasoning that the framework can produce.
+- **`dialog.open({ folder: true })`**: selects a directory instead of a file, via
+  `FOS_PICKFOLDERS` on the Common Item Dialog. Composes with `multi` for a
+  multi-select of directories; combining it with `filters` is refused, because a
+  filter cannot select a directory and silently showing a file picker is worse
+  than an error (ADR-0039). No WinRT involved, so it works where a
+  `Windows.Storage` picker would not.
+- **Toast action buttons are accepted, validated and built, but not sent**
+  (ADR-0039). `NotificationOptions.actions` decodes, is bounded (three buttons,
+  unique ids, legal placement, escaped attributes) and renders to a tested
+  `<actions>` element - but `toast_actions_available` is false, so `notify`
+  sends a toast without them and `vails doctor` says why. Rendering a button that
+  does nothing would be the same lie the balloon was removed for; delivery needs
+  two WinRT IIDs that this build environment cannot supply, and the gate is the
+  one constant to flip when it can.
+
+### Changed
+
+- **`vails doctor` now names the cause of an unavailable toast**
+  (ADR-0039). It previously reported `REGDB_E_CLASSNOTREG`, whose two causes -
+  a wrong AppUserModelID and a Windows with no WinRT class store - need opposite
+  fixes. It now distinguishes them and, for a stripped image, says that
+  `HKLM\SOFTWARE\Classes\ActivatableClasses\ClassId` is missing, that this
+  affects *all* WinRT and is not a Vails bug, and names the repair commands.
+- **`{"multi": true}` on `dialog.message` is now refused** instead of silently
+  ignored. The kind-scoping checks sat below `message`'s early return, so a
+  dropped flag looked like a working one (ADR-0039).
+
+### Fixed
+
+- `dialog.open({ folder: true })` rejects `filters` combinations that could not be
+  honoured instead of ignoring them.
+
 - **`vails doctor` no longer claims a notification works where one cannot be
   shown.** `notification`'s support line was a hardcoded `ready: true` — a
   *compile-time* fact dressed up as a runtime one — while `notification.is_supported`

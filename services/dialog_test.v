@@ -471,3 +471,94 @@ fn test_only_accept_means_the_chooser_took_the_files() {
 		assert !gtk_chooser_accepted(rc), rc.str()
 	}
 }
+
+// ## folder picking (ADR-0039)
+//
+// The Windows half of folder mode is one flag - FOS_PICKFOLDERS - and `v test`
+// cannot see it; the real picker is proven by hand (tests/e2e_windows/README.md).
+// What IS testable, and where the design decisions actually live, is the policy
+// around it: which combinations are legal, and that the flag survives the real
+// manifest and the real validation instead of only the direct parse.
+
+// folder decodes from JSON like every other option: snake_case, because the V
+// field name IS the wire name (json2 does not map camelCase onto it).
+fn test_parse_folder_option() {
+	opts := parse_options(kind_open, '{"title":"Pick a folder","folder":true}') or {
+		panic(err.msg())
+	}
+	assert opts.folder
+	assert !opts.multi
+	assert opts.title == 'Pick a folder'
+	// Default off. A new bool that defaulted true would silently repoint every
+	// dialog.open in every app on the machine, which is why the test states the
+	// negative rather than trusting the zero value.
+	n := parse_options(kind_open, '{"title":"Pick"}') or { panic(err.msg()) }
+	assert !n.folder
+	assert !n.multi
+}
+
+// folder + multi is legal, and it is a third thing rather than either alone: a
+// multi-select of DIRECTORIES. Worth pinning because the alternative failure is
+// silent - one of the two flags lands on one OS flag and the user can only ever
+// choose one.
+fn test_folder_combines_with_multi() {
+	opts := parse_options(kind_open, '{"folder":true,"multi":true}') or {
+		panic(err.msg())
+	}
+	opts.validate(kind_open)!
+	assert opts.folder
+	assert opts.multi
+}
+
+// A filter selects files, so it cannot mean anything in folder mode. Rejected
+// rather than ignored: a caller who asked for *.png and got a directory chooser
+// back has been handed a dialog that cannot do what they asked for and looks
+// like it worked.
+//
+// parse_options validates on the way out, so the rejection lands here rather
+// than in a separate validate() call - which is the point: there is no route
+// into the service that skips this.
+fn test_folder_rejects_filters() {
+	mut failed := ''
+	parse_options(kind_open,
+		'{"folder":true,"filters":[{"name":"Images","extensions":"png"}]}') or {
+		failed = err.msg()
+	}
+	assert failed.contains('folder')
+	assert failed.contains('filters')
+}
+
+fn test_folder_is_only_valid_for_open() {
+	// save and message have no folder mode at all, and must say so rather than
+	// ignoring the flag.
+	mut failed := ''
+	parse_options(kind_save, '{"folder":true}') or { failed = err.msg() }
+	assert failed.contains('folder')
+	mut failed2 := ''
+	parse_options(kind_message, '{"folder":true}') or { failed2 = err.msg() }
+	assert failed2.contains('folder')
+}
+
+// The generated TypeScript is the other half of the contract, and the half a
+// frontend actually compiles against: a `folder` field that decodes in V but
+// is missing from DialogOpenOptions is invisible to every test above and is
+// reported by the user's editor as an unknown property.
+fn test_ts_types_advertise_folder() {
+	ts := dialog_ts_types().join(' ')
+	assert ts.contains('folder?: boolean')
+	// And it sits beside multi on the *open* params, not on save or message.
+	assert ts.contains('multi?: boolean')
+	// camelCase would decode to nothing (json2 does not map it), so its absence
+	// is part of the contract, not a style preference.
+	assert !ts.contains('folderPath')
+}
+
+// multi was silently accepted and dropped on a message dialog, because the
+// kind-scoping checks sat below that kind's early return. `folder` would have
+// inherited the hole. Pinned here because the shape of the bug is a change in
+// *statement order*, which nothing else notices.
+fn test_multi_is_refused_on_a_message_dialog() {
+	mut failed := ''
+	parse_options(kind_message, '{"multi":true}') or { failed = err.msg() }
+	assert failed.contains('multi')
+}

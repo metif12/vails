@@ -269,7 +269,7 @@ static void vails_free_filter_set(vails_filter_set *set) {
 //
 // Hints are advisory: a hint that cannot be applied must not fail the
 // dialog.
-static void vails_config_dialog(IFileDialog *dlg, int is_save, int multi,
+static void vails_config_dialog(IFileDialog *dlg, int is_save, int multi, int folder,
                                 const char *title, const char *filters,
                                 const char *default_path, const char *default_name) {
 	wchar_t *w_title = vails_utf8_to_wide(title);
@@ -278,7 +278,11 @@ static void vails_config_dialog(IFileDialog *dlg, int is_save, int multi,
 	if (w_title) {
 		dlg->lpVtbl->SetTitle(dlg, w_title);
 	}
-	if (filters && filters[0]) {
+	// Skipped in folder mode, and not only because dialog.v rejects the
+	// combination: FOS_PICKFOLDERS and a file-type filter are contradictory
+	// requests to the same dialog, and the shim must not be the thing that
+	// decides which one wins.
+	if (!folder && filters && filters[0]) {
 		vails_filter_set fs;
 		if (vails_build_filter_set(filters, &fs) && fs.count > 0) {
 			dlg->lpVtbl->SetFileTypes(dlg, (UINT)fs.count, fs.specs);
@@ -287,7 +291,19 @@ static void vails_config_dialog(IFileDialog *dlg, int is_save, int multi,
 		vails_free_filter_set(&fs);
 	}
 	FILEOPENDIALOGOPTIONS opts = FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
-	if (is_save) {
+	if (folder) {
+		// FOS_PICKFOLDERS = 0x20 (shobjidl.h). This is the whole of folder
+		// picking: same IFileDialog, same result plumbing, one flag. Chosen
+		// over Windows.Storage.Pickers for the reason in ADR-0039 - no WinRT,
+		// so it works on an image whose WinRT class store has been stripped.
+		opts |= FOS_PICKFOLDERS;
+		// FOS_FILEMUSTEXIST is deliberately NOT set here. It constrains the
+		// selected *file*, which folder mode never selects, and FOS_PATHMUSTEXIST
+		// above already requires the chosen directory to exist.
+		if (multi) {
+			opts |= FOS_ALLOWMULTISELECT;
+		}
+	} else if (is_save) {
 		opts |= FOS_OVERWRITEPROMPT;
 	} else {
 		opts |= FOS_FILEMUSTEXIST;
@@ -327,8 +343,8 @@ static int vails_write_one_path(wchar_t *wpath, char *out, int out_len, int *at)
 }
 
 static int vails_dialog_open(void *hwnd, const char *title, const char *filters,
-                             const char *default_path, int multi, char *out,
-                             int out_len) {
+                             const char *default_path, int multi, int folder,
+                             char *out, int out_len) {
 	vails_dialog_clear_error();
 	// The common item dialog needs an STA. Handlers run on the main thread
 	// (ADR-0010/0014), which is the thread that first touches COM here,
@@ -346,7 +362,8 @@ static int vails_dialog_open(void *hwnd, const char *title, const char *filters,
 		CoUninitialize();
 		return -1;
 	}
-	vails_config_dialog((IFileDialog *)dlg, 0, multi, title, filters, default_path, NULL);
+	vails_config_dialog((IFileDialog *)dlg, 0, multi, folder, title, filters,
+	                    default_path, NULL);
 	hr = dlg->lpVtbl->Show(dlg, (HWND)hwnd);
 	int rc;
 	if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
@@ -416,7 +433,9 @@ static int vails_dialog_save(void *hwnd, const char *title, const char *filters,
 		CoUninitialize();
 		return -1;
 	}
-	vails_config_dialog((IFileDialog *)dlg, 1, 0, title, filters, default_path,
+	// save has no folder mode: dialog.v rejects folder on kind "save", so the
+	// flag is passed as 0 rather than threaded through the save signature.
+	vails_config_dialog((IFileDialog *)dlg, 1, 0, 0, title, filters, default_path,
 	                    default_name);
 	hr = dlg->lpVtbl->Show(dlg, (HWND)hwnd);
 	int rc;

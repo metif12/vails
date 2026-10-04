@@ -33,6 +33,13 @@
 			"platforms": []
 		},
 		{
+			"id": "balloons",
+			"windows": ["main"],
+			"commands": ["balloon.show", "balloon.is_supported"],
+			"asset_roots": [],
+			"platforms": []
+		},
+		{
 			"id": "menus",
 			"windows": ["main"],
 			"commands": ["menu.popup", "menu.close", "menu.set_menu"],

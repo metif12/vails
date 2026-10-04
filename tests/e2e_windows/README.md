@@ -114,6 +114,21 @@ runtime):
   - `Save as…` → type a name → `ready to write: <path>`.
   - `Ask…` / `Confirm…` → MessageBox with OK / Yes-No-Cancel; the status
     shows `button: ok|yes|no|cancel`.
+  - `Pick a folder.` (`{"folder": true}`, ADR-0039) - the dialog offers
+    directories only; a chosen directory comes back in `paths` exactly like a
+    chosen file. This is the Common Item Dialog with `FOS_PICKFOLDERS`
+    (`shobjidl.h:21513`), so no WinRT is involved and it keeps working on an
+    image whose WinRT class store is stripped.
+  - `Pick several folders.` (`{"folder": true, "multi": true}`) - multi-select
+    of *directories*, a third thing distinct from both file multi-select and
+    folder single-select.
+  - `Pick a folder with a filter.` - must fail with `bad params:` naming
+    `folder` and `filters`. A filter cannot select a directory, and silently
+    showing a file picker instead is the failure this guards.
+  - `{"multi": true}` on a `message` command - must also fail with
+    `bad params:`. It used to be silently ignored: the kind-scoping checks sat
+    below `message`'s early return, so a dropped flag looked like a working
+    one. `folder` would have inherited the same hole.
   - `Read host info` → os/arch/hostname/cwd/cpus from the `os_info` service.
   - `Call an ungranted command` → rejected with `forbidden: app.not_granted
     is not allowed for window "main"` (never `unknown method`).
@@ -526,3 +541,151 @@ regressed on the side that was already working: the four button names
 now pinned on both platforms by the same pure-V tests, so the two native halves
 are held to one vocabulary. If a GTK dialog ever reports a button the Windows
 box does not, that is the assertion to look at.
+
+
+## If `doctor` says the WinRT class store is missing (ADR-0039)
+
+`vails doctor` prints this on a machine whose Windows cannot activate **any**
+WinRT class:
+
+```
+stub notification - ... this Windows has no WinRT class store:
+HKLM\SOFTWARE\Classes\ActivatableClasses\ClassId is missing, so NO WinRT class
+can be activated - not just the toast ones. This is a stripped/debloated
+Windows image, not a Vails bug, and no AppUserModelID will fix it.
+```
+
+The first thing to check, because it costs nothing and it is the diagnostic
+that matters:
+
+```powershell
+# 0. does the store exist? On a healthy Windows 11 this key HOLDS THOUSANDS of
+#    system WinRT classes, so "absent" is the whole answer
+Test-Path 'HKLM:\SOFTWARE\Classes\ActivatableClasses\ClassId'
+
+# the two branches a debloat script removes, and the two it leaves alone
+Get-ChildItem 'HKLM:\SOFTWARE\Classes\CLSID' | Measure-Object   # ~7447 = COM fine
+Get-ChildItem 'C:\Windows\WinSxS' -Directory | Measure-Object  # ~20 000 = fine
+```
+
+- `ClassId` **absent** and COM/WinSxS fine -> a stripped image. This is what
+  the note above describes, and it affects every WinRT API, not just toasts.
+- `ClassId` **present** but the toast still fails -> a partial install of the
+  notification component; `doctor`'s other note covers that case.
+
+### Repair
+
+Run from an **elevated** prompt. This is deliberately not automated: it is an
+admin operation on the user's machine, and a test suite should not have the
+ability to run it.
+
+```powershell
+# 1. repair the component store - this is what can put the registry branches
+#    back, because they are delivered as component manifests
+DISM /Online /Cleanup-Image /RestoreHealth
+
+# 2. then repair the system files themselves
+sfc /scannow
+
+# 3. re-check (a reboot is worth doing before judging the result)
+Test-Path 'HKLM:\SOFTWARE\Classes\ActivatableClasses\ClassId'
+.\vails.exe doctor
+```
+
+If step 3 still reports the key as missing, the image was trimmed far enough
+that the manifests are gone too. The reliable fix is an **in-place repair**:
+mount an official Windows 11 ISO and run its setup, choosing *Keep files and
+apps*. That rebuilds the component store from Windows' own media without
+touching your apps or files.
+
+### What works while the toast does not
+
+Worth knowing before spending an afternoon on repair, because the point of
+diagnosing this precisely was to know which parts of the framework are
+affected:
+
+| capability | needs WinRT? | on a stripped image |
+|---|---|---|
+| `dialog.open` / `save` / `message` | no - COM (`IFileOpenDialog`, `MessageBoxW`) | **works** |
+| `tray`, `menu`, `clipboard`, `opener`, `drop` | no - Win32 + `shell32` | **works** |
+| `notification` (toast) | **yes** | fails, with the note above |
+| `balloon` | no - `Shell_NotifyIconW` + `NIF_INFO` | **works** |
+
+`notification` is deliberately WinRT-only (ADR-0039): it has no fallback, so it
+fails loudly rather than showing you a message that is not a real Windows
+notification. The `balloon` service exists for the other case, as its own
+service - not as a substitute, and never reachable through `notification`.
+
+## `balloon` service (ADR-0039) - secondary shell message - **RUNS, seen only by a human**
+
+Pure V and unit-tested (`services/balloon_test.v`); the shell calls are not,
+because a balloon needs a notification area and a human. `examples/showcase`
+and `examples/services` both ship a panel/button for it.
+
+**What a verify run already proves** (measured 2026-10-03, Windows 11 build
+28000, the machine whose WinRT class store is missing):
+
+```
+notify       FAIL    ... RoGetActivationFactory(ToastNotificationManager) failed (hr=0x80040154)
+balloon      NEEDS YOU  balloon reported ok - it appeared in the notification area, ...
+```
+
+Two lines from one run, and they are the whole argument for ADR-0039: the toast
+cannot work on this machine and the balloon can. `balloon.show` resolved with
+`"balloon"`, which means `Shell_NotifyIconW` took the icon - the native half is
+live, not just compiled.
+
+What that run does **not** prove is the part only a human sees: that a balloon is
+visibly readable, and that the temporary tray icon is removed afterwards. Watch
+the notification area:
+
+```powershell
+$env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
+v -cc gcc -o services.exe ./examples/services   # same 5 DLLs next to the exe
+# or the reference vehicle, which also proves the pair side by side:
+v -cc gcc -o showcase.exe ./examples/showcase
+$env:VAILS_SHOWCASE_VERIFY = '1' ; .\showcase.exe
+```
+
+`examples/services` and `examples/showcase` both ship the grant already, so
+`vails doctor --config examples\services\vails.json` lists **8** granted services
+and `examples\showcase` lists **11** capabilities - both including `balloons`.
+
+The `vails doctor` check that matters before anything else:
+
+```powershell
+vails doctor
+```
+
+must show two visibly different lines - `notification` refusing the toast with
+the WinRT-class-store diagnosis, and `balloon` reporting `ok`. If balloon's note
+ever says "toast", ADR-0039 has been broken.
+
+Then, from the page's console (or the "Show balloon" button in
+`examples/services`, which is the same call):
+
+1. `window.vails.balloon.show({ body: "first balloon" })` - a balloon appears in
+   the notification area and the promise resolves with `"balloon"`.
+2. Add a title: `{ title: "Build", body: "2 errors" }` - the balloon carries both
+   strings. On Windows 11 it is attributed to the **bare `.exe` name**, which is
+   the limitation ADR-0018 refused to accept for `notification` and the reason
+   this is a separate service.
+3. **The dead-icon check, and the one that actually matters.** After the balloon's
+   `timeout_ms` plus ~1.5 s, the tray icon must be **gone**. Watch the
+   notification area while sending five balloons in a row: at most one icon is
+   present at any time, and the area is empty once they have passed. A row of
+   icons that never clears is ADR-0018's third objection reproducing, and the
+   per-call `uId` in `balloon_icon_id` is what prevents it.
+4. Send two balloons while the first is still up - the first's icon must not
+   reappear, and the second must not be deleted early. That is the "a late worker
+   deletes the winner's icon" case, and it is what the 1024-id span buys.
+5. `balloon.show({ body: "" })` - rejected with `bad params:` naming
+   `body is required`. A balloon with no text is a tray icon with nothing
+   attached to it.
+6. `balloon.show({ body: "x".repeat(256) })` - rejected with `bad params:` naming
+   `body`. The bound is the shell's own `szInfo` width (256 units, minus the
+   NUL), so a caller that fits is never clipped by the platform.
+7. `balloon.show({ body: "needs a window" })` from a headless caller (no window)
+   - an error explaining that a balloon is a tray icon and therefore belongs to a
+   window. Unlike `notification`, which the shell attributes on its own.
+8. `balloon.show` without the grant - `forbidden:`, never `unknown method`.

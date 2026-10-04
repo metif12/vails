@@ -34,6 +34,7 @@ import webview
 fn C.vails_toast_show(aumid &char, display &char, xml &char) int
 fn C.vails_toast_last_error() &char
 fn C.vails_toast_available() int
+fn C.vails_toast_diagnose() &char
 
 // is_supported_native answers "does this build have a backend", which is a
 // compile-time fact: the toast code is linked in, so yes.
@@ -55,6 +56,23 @@ fn is_supported_native() bool {
 pub fn toast_available() bool {
 	unsafe {
 		return C.vails_toast_available() == 1
+	}
+}
+
+// toast_diagnose_native returns one of the toast_reason_* codes declared in
+// notification.v, or the empty string when the classes activate.
+//
+// The `unsafe` block is around the call only, and the result is copied out of
+// the shim's static buffer into a V string before the block ends - the buffer
+// is static and one-deep (ADR-0010/0014), so the `vstring()` copy is what
+// makes the answer safe to hold on to.
+//
+// No `vstring()` inside the `unsafe` block: that is the shape that
+// `webview/window_test.v`'s ready_window warns about, where the value was
+// taken from a place the block could not vouch for.
+fn toast_diagnose_native() string {
+	unsafe {
+		return C.vails_toast_diagnose().vstring()
 	}
 }
 

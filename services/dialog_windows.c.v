@@ -18,7 +18,7 @@ import webview
 // user32: MessageBoxW
 #flag windows -lole32 -lshell32 -luser32
 
-fn C.vails_dialog_open(hwnd voidptr, title &char, filters &char, default_path &char, multi int, out &u8, out_len int) int
+fn C.vails_dialog_open(hwnd voidptr, title &char, filters &char, default_path &char, multi int, folder int, out &u8, out_len int) int
 fn C.vails_dialog_save(hwnd voidptr, title &char, filters &char, default_path &char, default_name &char, out &u8, out_len int) int
 fn C.vails_dialog_message(hwnd voidptr, title &char, message &char, buttons int) int
 fn C.vails_dialog_last_error() &char
@@ -71,10 +71,11 @@ fn open_native(ctx webview.Ctx, opts Options) !Result {
 	parent := if ctx.has_parent() { ctx.parent } else { unsafe { nil } }
 	filters := native_filter_string(opts.filters)
 	multi := if opts.multi { 1 } else { 0 }
-	return with_buffer(fn [parent, filters, multi, opts] (out &u8, len int) int {
+	folder := if opts.folder { 1 } else { 0 }
+	return with_buffer(fn [parent, filters, multi, folder, opts] (out &u8, len int) int {
 		unsafe {
 			return C.vails_dialog_open(parent, opts.title.str, filters.str,
-				opts.default_path.str, multi, out, len)
+				opts.default_path.str, multi, folder, out, len)
 		}
 	})
 }

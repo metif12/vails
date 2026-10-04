@@ -26,9 +26,16 @@ pub fn manifests() []Service {
 	// here puts something in front of the user, and this one asks the user for
 	// something. The order is cosmetic - nothing looks a service up by position -
 	// but appending is the honest way to add one.
+	//
+	// `balloon` is last of all (ADR-0039), and the placement carries the point:
+	// it is the *secondary* message mechanism, sitting after `notification` the
+	// same way it sits after it in the docs. Reading this list top to bottom,
+	// `notification` is the way to tell a user something; `balloon` is the thing
+	// you reach for when the machine cannot do the first one.
 	return [
 		dialog_manifest(),
 		notification_manifest(),
+		balloon_manifest(),
 		menu_manifest(),
 		tray_manifest(),
 		clipboard_manifest(),

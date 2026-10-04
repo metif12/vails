@@ -11,6 +11,11 @@
 //                          negative = failure, message in vails_toast_last_error
 //   vails_toast_last_error -> message for the last failure, never NULL
 //   vails_toast_available -> 1 when the WinRT toast classes can be activated
+//   vails_toast_diagnose  -> "" when they can, else a stable reason code (see
+//                             vails_toast_reason_* below). A *code* rather
+//                             than a sentence, because the sentence belongs
+//                             to the V half (services/notification.v), which
+//                             is where the tests can reach it.
 //
 // What the sequence actually is, because every step was necessary and the
 // order is not obvious:
@@ -101,6 +106,51 @@ static void vails_toast_error_text(const char *msg) {
 		vails_toast_err[i] = msg[i];
 	}
 	vails_toast_err[i] = 0;
+}
+
+// Reason codes for vails_toast_diagnose. Kept as strings, not an enum, because
+// the V half switches on them and an enum would put the boundary value in two
+// places. The V-side spelling of each is services/notification.v's
+// toast_reason_* constants, and notification_test.v asserts the two agree in
+// wording - the C half cannot be unit-tested, so the mapping has to be
+// checkable from V.
+//
+// `no-class-store` is the one that earned its keep. `REGDB_E_CLASSNOTREG` on a
+// toast has two very different causes: the app's own identity is wrong, or the
+// machine has no system WinRT class store at all. They read identically as an
+// HRESULT, so the check below looks for the missing branch explicitly rather
+// than paraphrasing the HRESULT.
+//
+// Measured on Windows 11 build 28000 (ADR-0039): a debloated image where
+// HKLM\SOFTWARE\Classes\ActivatableClasses\ClassId and ...\Classes\AppX are both
+// absent while COM (7447 CLSIDs) and WinSxS are intact. There, *every* system
+// WinRT class fails to activate - not just the toast ones - which is why the
+// check is on the store rather than on the toast class.
+#define vails_toast_reason_ok ""
+#define vails_toast_reason_no_class_store "no-class-store"
+#define vails_toast_reason_not_registered "not-registered"
+#define vails_toast_reason_activate_failed "activate-failed"
+#define vails_toast_reason_init_failed "init-failed"
+
+// The WinRT system class store. System activatable classes are registered here,
+// and on Windows 10+ this - not HKCR\CLSID - is where RoGetActivationFactory
+// looks. Checking CLSID (which is where a first guess goes) would have said
+// "absent" on a machine where WinRT works perfectly, because system WinRT
+// classes are simply not registered there.
+#define vails_toast_class_store \
+	"SOFTWARE\\Classes\\ActivatableClasses\\ClassId"
+
+// vails_winrt_class_store_missing reports whether the system WinRT class store
+// is gone. Exists as its own function so the same fact can be reused by the
+// "other WinRT capability" seam later without re-probing the registry.
+static int vails_winrt_class_store_missing(void) {
+	HKEY k = NULL;
+	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, vails_toast_class_store, 0, KEY_READ, &k) !=
+	    ERROR_SUCCESS) {
+		return 1;
+	}
+	RegCloseKey(k);
+	return 0;
 }
 
 // The four IIDs, copied verbatim from the installed MSYS2 headers because
@@ -211,6 +261,8 @@ static int vails_register_aumid(const wchar_t *aumid, const wchar_t *display) {
 	return 0;
 }
 
+const char *vails_toast_diagnose(void); // defined below; vails_toast_available needs it
+
 // vails_toast_available reports whether the WinRT toast classes can be
 // activated at all.
 //
@@ -221,29 +273,56 @@ static int vails_register_aumid(const wchar_t *aumid, const wchar_t *display) {
 // component DLLs (a stripped Server-style image, for instance) can compile
 // and link this file perfectly and still be unable to raise a toast - which
 // is exactly the case a plain `true` would hide.
+//
+// A thin wrapper over the diagnose below rather than a second implementation:
+// two probes of the same fact would be free to disagree.
 int vails_toast_available(void) {
+	return vails_toast_diagnose()[0] == 0;
+}
+
+// vails_toast_diagnose runs that probe once and answers *which way* it failed.
+//
+// The class-store check comes first and short-circuits, because it is the one
+// answer that is both cheap and actionable: if the store is gone, activating
+// is guaranteed to fail with REGDB_E_CLASSNOTREG, so probing activation would
+// only re-derive a conclusion we already have.
+const char *vails_toast_diagnose(void) {
+	if (vails_winrt_class_store_missing()) {
+		return vails_toast_reason_no_class_store;
+	}
 	HRESULT hr = RoInitialize(RO_INIT_MULTITHREADED);
 	// S_OK / S_FALSE mean "initialized" (S_FALSE = already done);
 	// RPC_E_CHANGED_MODE means the thread is COM-initialized in a
 	// different apartment, which is still usable for WinRT.
 	int uninit = (hr == S_OK);
 	if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
-		return 0;
+		return vails_toast_reason_init_failed;
 	}
+	const char *reason = vails_toast_reason_ok;
 	HSTRING cls = NULL;
-	int ok = 0;
-	if (SUCCEEDED(WindowsCreateString(VAILS_CLS_TOAST_MANAGER, (UINT32)wcslen(VAILS_CLS_TOAST_MANAGER), &cls))) {
+	if (FAILED(WindowsCreateString(VAILS_CLS_TOAST_MANAGER,
+	                               (UINT32)wcslen(VAILS_CLS_TOAST_MANAGER), &cls))) {
+		reason = vails_toast_reason_activate_failed;
+	} else {
 		__x_ABI_CWindows_CUI_CNotifications_CIToastNotificationManagerStatics *mgr = NULL;
-		ok = SUCCEEDED(RoGetActivationFactory(cls, &vails_iid_toast_manager, (void **)&mgr)) && mgr != NULL;
+		hr = RoGetActivationFactory(cls, &vails_iid_toast_manager, (void **)&mgr);
 		if (mgr) {
 			mgr->lpVtbl->Release(mgr);
+		}
+		if (hr == REGDB_E_CLASSNOTREG) {
+			// The store exists but this class is not in it. Either a
+			// partial strip, or a genuinely missing notification
+			// component - not the debloated-image case above.
+			reason = vails_toast_reason_not_registered;
+		} else if (FAILED(hr) || mgr == NULL) {
+			reason = vails_toast_reason_activate_failed;
 		}
 		WindowsDeleteString(cls);
 	}
 	if (uninit) {
 		RoUninitialize();
 	}
-	return ok;
+	return reason;
 }
 
 // vails_toast_emit is the whole activation sequence, with the apartment

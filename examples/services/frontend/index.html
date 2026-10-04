@@ -133,7 +133,7 @@
 <main>
   <header>
     <h1>Vails Services Demo</h1>
-    <p class="subtitle">Seven services, one window: <code>clipboard</code>, <code>opener</code>, <code>notification</code>, <code>menu</code>, <code>dialog</code>, <code>tray</code> and <code>os_info</code>. Wave 3 of Phase 5 S1 added <code>menu</code> and <code>tray</code> (ADR-0017); wave 4 added the window menu bar, the tray menu and the GTK dialogs (ADR-0023, ADR-0026, ADR-0027).</p>
+    <p class="subtitle">Eight services, one window: <code>clipboard</code>, <code>opener</code>, <code>notification</code>, <code>balloon</code>, <code>menu</code>, <code>dialog</code>, <code>tray</code> and <code>os_info</code>. Wave 3 of Phase 5 S1 added <code>menu</code> and <code>tray</code> (ADR-0017); wave 4 added the window menu bar, the tray menu and the GTK dialogs (ADR-0023, ADR-0026, ADR-0027); ADR-0039 added <code>balloon</code> as a <em>secondary</em> message mechanism, kept deliberately separate from <code>notification</code>.</p>
   </header>
 
   <section>
@@ -156,6 +156,16 @@
       <button id="notify-support" type="button">Ask is_supported</button>
     </div>
     <output id="notify-status" role="status"></output>
+  </section>
+
+  <section>
+    <h2>Balloon</h2>
+    <p class="note">A <strong>separate service</strong> from Notification, not a fallback for it. <code>notification</code> is the WinRT toast and has no second mechanism by decision (ADR-0039); this is <code>Shell_NotifyIconW</code> with <code>NIF_INFO</code>, which needs nothing from WinRT and therefore works on a machine where the toast cannot. It is also plainly lesser &mdash; Windows 11 attributes it to the bare <code>.exe</code> name &mdash; which is why it is a service you ask for by name rather than something <code>notification</code> falls back to.</p>
+    <div class="row">
+      <button class="primary" id="balloon-show" type="button">Show balloon</button>
+      <button id="balloon-support" type="button">Ask is_supported</button>
+    </div>
+    <output id="balloon-status" role="status"></output>
   </section>
 
   <section>
@@ -195,10 +205,12 @@
     <p class="note">Native file, save and message dialogs. All three are <code>blocking: true</code> in the manifest, which is the ADR-0014 exception: a modal dialog runs a nested loop, so the calling thread parks until the user answers. A <code>canceled</code> result is a normal answer, not an error — only a genuine failure rejects.</p>
     <div class="row">
       <button class="primary" id="dialog-open" type="button">Open file...</button>
+      <button id="dialog-folder" type="button">Pick a folder...</button>
       <button id="dialog-save" type="button">Save as...</button>
       <button id="dialog-message" type="button">Show a message</button>
     </div>
     <output id="dialog-status" role="status"></output>
+    <p class="note" id="dialog-folder-note"><code>{"folder": true}</code> selects a directory instead of a file: the same Common Item Dialog with <code>FOS_PICKFOLDERS</code>, so no WinRT is involved and it works on a Windows whose WinRT class store has been stripped. <code>{"folder": true, "multi": true}</code> picks several. Combining it with <code>filters</code> is refused &mdash; a filter cannot select a directory.</p>
   </section>
 
   <section>
@@ -262,6 +274,9 @@
   var nsNote = v.notification = v.notification || {};
   nsNote.notify = function (params) { return v.call("notification.notify", params || ""); };
   nsNote.is_supported = function (params) { return v.call("notification.is_supported", params || ""); };
+  var nsBalloon = v.balloon = v.balloon || {};
+  nsBalloon.show = function (params) { return v.call("balloon.show", params || ""); };
+  nsBalloon.is_supported = function (params) { return v.call("balloon.is_supported", params || ""); };
   var nsMenu = v.menu = v.menu || {};
   nsMenu.popup = function (params) { return v.call("menu.popup", params || ""); };
   nsMenu.close = function (params) { return v.call("menu.close", params || ""); };
@@ -296,10 +311,14 @@
   var traySetMenuBtn = $("tray-set-menu");
   var trayDestroyBtn = $("tray-destroy");
 
-  var dialogOpenBtn = $("dialog-open");
-  var dialogSaveBtn = $("dialog-save");
-  var dialogMessageBtn = $("dialog-message");
-  var dialogStatus = $("dialog-status");
+var dialogOpenBtn = $("dialog-open");
+  var dialogFolderBtn = $("dialog-folder");
+    var dialogSaveBtn = $("dialog-save");
+    var dialogMessageBtn = $("dialog-message");
+    var dialogStatus = $("dialog-status");
+    var balloonBtn = $("balloon-show");
+    var balloonSupportBtn = $("balloon-support");
+    var balloonStatus = $("balloon-status");
   var hostBtn = $("host");
   var forbiddenBtn = $("forbidden");
   var clipStatus = $("clip-status");
@@ -524,6 +543,35 @@
       .then(function () { notifySupportBtn.disabled = false; });
   });
 
+  // The balloon is asked directly rather than through is_supported first, which
+  // is the opposite of the toast handler above and on purpose: balloon's
+  // availability is a compile-time fact with no failure mode worth pre-checking,
+  // while the toast's is a runtime probe whose answer changes the diagnosis. The
+  // short timeout is what makes the temporary tray icon's removal observable
+  // without watching the notification area for a minute.
+  balloonBtn.addEventListener("click", function () {
+    balloonBtn.disabled = true;
+    window.vails.balloon.show({
+      title: "Vails Services Demo",
+      body: "Balloon from the page. Its tray icon disappears ~3.5s from now.",
+      timeout_ms: 2000
+    })
+      .then(function (mechanism) {
+        setStatus(balloonStatus, "shown via: " + mechanism + " - it is in the " +
+          "notification area, attributed to the bare .exe name (not a toast)", "ok");
+      })
+      .catch(function (e) { setStatus(balloonStatus, "balloon.show failed: " + e, "bad"); })
+      .then(function () { balloonBtn.disabled = false; });
+  });
+
+  balloonSupportBtn.addEventListener("click", function () {
+    balloonSupportBtn.disabled = true;
+    window.vails.balloon.is_supported()
+      .then(function (r) { setStatus(balloonStatus, "is_supported: " + r, "ok"); })
+      .catch(function (e) { setStatus(balloonStatus, "is_supported failed: " + e, "bad"); })
+      .then(function () { balloonSupportBtn.disabled = false; });
+  });
+
   menuPopupBtn.addEventListener("click", function () {
     setStatus(menuStatus, "opening...");
     // popup resolves with '' on every platform; the choice arrives as an
@@ -636,9 +684,20 @@
         { name: "Text files", extensions: "txt,md" },
         { name: "Everything", extensions: "*" }
       ]
-    }).then(function (raw) { reportDialogResult(raw, "open"); })
-      .catch(function (e) { setStatus(dialogStatus, "dialog.open failed: " + e, "bad"); });
-  });
+}).then(function (raw) { reportDialogResult(raw, "open"); })
+        .catch(function (e) { setStatus(dialogStatus, "dialog.open failed: " + e, "bad"); });
+    });
+
+    // folder mode: no `filters` key at all, because a filter cannot select a
+    // directory and the service refuses the combination. The refusal is worth
+    // being able to see, so the catch prints it verbatim rather than hiding it
+    // behind a generic message.
+    dialogFolderBtn.addEventListener("click", function () {
+      setStatus(dialogStatus, "waiting for the folder picker...");
+      window.vails.dialog.open({ title: "Pick a folder", folder: true })
+        .then(function (raw) { reportDialogResult(raw, "open"); })
+        .catch(function (e) { setStatus(dialogStatus, "dialog.open failed: " + e, "bad"); });
+    });
 
   dialogSaveBtn.addEventListener("click", function () {
     setStatus(dialogStatus, "waiting for the save dialog...");

@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- The default policy, same as every other example: this page is
+     self-contained (no external origin, no eval), so nothing here needs a
+     relaxation and the one below is byte-for-byte `webview.default_csp()`.
+     Kept rather than relying on injection so the policy is visible in the
+     file, and because `v test ./webview` asserts every example ships it -
+     which is how this one was found missing. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
 <title>Vails Showcase</title>
 <style>
   /* One stylesheet, no framework: this page is a reference for what the
@@ -178,6 +185,18 @@
     <p class="why">A real toast on Windows (WinRT) and a tray balloon on Linux.
       The command returns which mechanism actually ran.</p>
     <div class="row"><button class="primary" data-run="notify">Notify</button></div>
+    <output data-status></output>
+  </section>
+
+  <section id="p-balloon" data-service="balloon">
+    <div class="head"><h2>Balloon</h2><span class="badge" data-badge>IDLE</span></div>
+    <p class="why">A <em>separate service</em> from Notification, not a fallback for
+      it: <code>notification</code> is the WinRT toast and has no second mechanism,
+      while this is <code>Shell_NotifyIconW</code> + <code>NIF_INFO</code> and works
+      on a Windows whose WinRT cannot activate at all (ADR-0039). Verdict
+      NEEDS YOU &mdash; the balloon lands in the notification area, not in this
+      window, and its icon must disappear about a second after it goes.</p>
+    <div class="row"><button class="primary" data-run="balloon">Balloon</button></div>
     <output data-status></output>
   </section>
 
@@ -464,6 +483,22 @@ const RUNNERS = {
       .then((r) => paint("notify", "PASS", r ? r + " reported ok" : "notified"));
   },
 
+  // NEEDS YOU, not PASS, and the reason is the same as tray's and dialog's: the
+  // evidence is outside this window. A resolved promise proves the shell took
+  // the icon; it cannot prove a human saw the balloon or that the temporary
+  // icon was cleaned up afterwards.
+  //
+  // The timeout is deliberately short so the cleanup window closes inside a
+  // screenshot run - the icon is removed at timeout + ~1.5s, and a panel whose
+  // evidence needs a minute of patience is a panel nobody checks.
+  balloon() {
+    return call("balloon.show", JSON.stringify({ title: "Vails Showcase", body: "the balloon service works", timeout_ms: 2000 }))
+      .then(
+        (r) => paint("balloon", "NEEDS YOU", r + " reported ok - it appeared in the notification area, and its tray icon should be gone in ~3.5s"),
+        (e) => paint("balloon", "FAIL", msg(e))
+      );
+  },
+
   // The refusal IS the pass. A resolved promise here would mean a granted
   // opener had become a way to launch any scheme.
   opener() {
@@ -603,7 +638,12 @@ document.querySelectorAll("[data-run]").forEach((btn) => {
 // order is deliberate: the capability gate first, because it is the cheapest
 // proof that dispatch is working at all, and a later panel failing for that
 // reason would be noise.
-const AUTO = ["bridge", "caps", "osinfo", "clipboard", "notify", "opener", "menubar", "post"];
+// `balloon` sits right after `notify` on purpose: the two are the same user need
+// and on a machine whose WinRT is stripped exactly one of them works, so a
+// verify run shows that pair side by side. It is in AUTO because balloon.show
+// returns immediately - unlike menu, tray, drop and dialog, it is not a modal or
+// a wait-for-a-human, so there is nothing for it to block.
+const AUTO = ["bridge", "caps", "osinfo", "clipboard", "notify", "balloon", "opener", "menubar", "post"];
 
 document.getElementById("run-all").addEventListener("click", async () => {
   const btn = document.getElementById("run-all");

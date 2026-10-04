@@ -28,17 +28,30 @@ fn C.LoadImageW(hinstance voidptr, name &u16, type_ u32, cx int, cy int, flags u
 // Shell messages and NOTIFYICONDATA flags, redeclared as literals
 // (AGENTS.md §2) so a wrong flag set is a visible diff and not a macro
 // surprise.
-//
-// Only what `tray` uses. The balloon flags (NIF_INFO) and the NIIF_*
-// family belonged to `notification` until ADR-0018 replaced it with a WinRT
-// toast, and are gone with it - this file is now the tray's primitive
-// rather than a primitive two services happened to share.
 const nim_add = u32(0x00000000)
 const nim_delete = u32(0x00000002)
 const nim_setversion = u32(0x00000004)
 const nif_message = u32(0x00000001)
 const nif_icon = u32(0x00000002)
 const nif_tip = u32(0x00000004)
+// The balloon flags. These went away with ADR-0018, which replaced the
+// `notification` balloon with a WinRT toast, and they come back for the
+// *balloon service* (ADR-0039) - which is not a retreat from that decision. A
+// balloon is back as its own service, never as a notification fallback, and the
+// distinction is the whole reason these flags live under a different name in a
+// different manifest.
+const nif_info = u32(0x00000010)
+
+// NIIF_* is the balloon's own info-flag family: which icon the balloon carries
+// and which chrome it uses. NIIF_NONE means "do not modify any of the flags",
+// which is what a caller that wants the shell's default asks for.
+//
+// Only this one member is declared, because it is the only one the service uses:
+// an unused constant is a notice in the build output, and a flag nobody sets is
+// not documentation. The rest of the family is NIIF_INFO_NONE (no icon inside
+// the balloon), NIIF_WARNING, NIIF_ERROR, NIIF_USER and the big-icon size
+// bits - adding an icon kind to balloon.show is a parameter and one line here.
+const niif_none = u32(0x00000000)
 
 // NOTIFYICON_VERSION_4 is what a tray menu is built on. Before it is set, the
 // shell sends a plain WM_RBUTTONUP and there is no way to ask "show a menu and

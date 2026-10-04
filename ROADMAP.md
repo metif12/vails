@@ -39,6 +39,7 @@ code in this repo should read §2c before it is written.
 | B (build & release) | `D0` sql policy, `B5` half (`deps`), `B0` version stamping, `B1` runnable `vails build`, `B2+B3` Dockerfile + CI | ADR-0034 | 2026-09-29 |
 | U/W0 | `webview.post_to_main` — **Windows**; Linux `g_idle_add` deferred | ADR-0019 | 2026-09-30 |
 | F0 | multi-window **routing** (`WindowRegistry`, `emit_to`) proven; the second Windows window written, **not observed** | ADR-0035 | 2026-09-30 |
+| ADR-0039 | `balloon` (secondary shell message), `dialog.open({folder})`, a reason for an unavailable toast, toast action buttons **built and gated** | ADR-0039 | 2026-10-03 |
 
 ## What is claimed and what is proven
 
@@ -61,6 +62,29 @@ is unproven. The four things most likely to be over-read:
 - **`post_to_main` is Windows-only.** On Linux it refuses by name; the
   `g_idle_add` trampoline is unwritten, and it is the first push onto the GTK
   main loop from a foreign thread in this repo's history.
+- **`notification` cannot work on this machine, and that is a property of the
+  Windows image rather than of Vails** (ADR-0039). Measured 2026-10-03 on
+  Windows 11 build 28000: `HKLM\SOFTWARE\Classes\ActivatableClasses\ClassId` and
+  `...\Classes\AppX` are both **absent**, so *no* WinRT class activates, while
+  COM (7447 CLSIDs) and WinSxS (19 799 entries) are intact - the signature of a
+  debloated image. The toast is therefore written-and-tested but **not
+  observable here**; `vails doctor` says so by name and names the repair, and
+  `tests/e2e_windows/README.md` carries the commands. `balloon` exists because of
+  this measurement, and it is pure Win32 so it does work here.
+- **`balloon`'s native half is observed; its visible behaviour is not**
+  (ADR-0039). `examples/showcase`'s verify run reports
+  `balloon NEEDS YOU ... balloon reported ok` on the same machine where
+  `notify` reports `FAIL ... hr=0x80040154`, so `Shell_NotifyIconW` with
+  `NIF_INFO` is demonstrably live where the toast cannot be. Two things remain
+  human-only: that a balloon is *readable*, and that the temporary tray icon is
+  removed ~1.5 s after the timeout (`tests/e2e_windows/README.md`, steps 1-4).
+- **Toast action buttons are built and gated, not shipped** (ADR-0039). The
+  `<actions>` element is written and unit-tested; `toast_actions_available` is
+  false because *delivery* needs two WinRT IIDs this environment cannot supply
+  (no uuid declarations in the mingw header, no C IIDs in the installed SDK, no
+  `Windows.winmd` or `UniversalApisContract.winmd`). Flipping that constant is
+  the whole remaining work, and guessing a GUID instead would activate the wrong
+  object.
 - **F0's second Windows window is written and type-checked, not observed.** The
   COM apartment that unblocks it is in `webview_windows.c.v` and `v vet webview`
   is green, but **this machine crashes its host on the `webview` test module** —

@@ -327,7 +327,14 @@ fn report(holder &CtxHolder) int {
 
 // expected_panels is how many panels the page has, which is what makes "only two
 // reported" a failure rather than a quiet success.
-const expected_panels = 11
+//
+// It is a hand-kept constant and that is the weakness: adding a panel to
+// examples/showcase/frontend/index.html means remembering this line, and
+// forgetting it under-reports rather than over-reports - the number that let
+// ADR-0039's balloon panel run without being counted, since 11 verdicts still
+// matched 11. The next panel added here should replace the constant with a count
+// taken from the document, if the injection seam can supply it.
+const expected_panels = 12
 
 // pad right-pads to `n` so the report lines up. Two spaces of slack, because a
 // verdict longer than the column would silently run the next column together and
@@ -433,7 +440,7 @@ fn verify_script() string {
 		'\n' +
 		'  };' + '\n' +
 		'  var safety = setTimeout(finish, 20000);' + '\n' +
-		'  var auto = ["bridge", "caps", "osinfo", "clipboard", "notify", ' +
+		'  var auto = ["bridge", "caps", "osinfo", "clipboard", "notify", "balloon", ' +
 		'"opener", "menubar", "post"];' + '\n' +
 		'  var chain = Promise.resolve();' + '\n' +
 		'  auto.forEach(function (k) { chain = chain.then(function () {' + '\n' +
@@ -562,6 +569,17 @@ fn main() {
 		}
 		services.install_notification(mut router, ctx, identity) or {
 			eprintln('showcase: notification: ' + err.msg())
+		}
+		// balloon is installed right after notification and on purpose rather than
+		// at the end of the list: the two are the same user need, and on a machine
+		// whose WinRT is stripped exactly one of them works. Installed next to it,
+		// a failing notification and a working balloon are neighbours in the log.
+		//
+		// Note it takes NO identity, unlike notification - a balloon is attributed
+		// by Windows 11 to the bare .exe name and cannot carry an app name, so there
+		// is nothing for an identity to change (ADR-0039).
+		services.install_balloon(mut router, ctx) or {
+			eprintln('showcase: balloon: ' + err.msg())
 		}
 		services.install_menu(mut router, ctx) or {
 			eprintln('showcase: menu: ' + err.msg())
