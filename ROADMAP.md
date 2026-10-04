@@ -312,9 +312,29 @@ item that would trigger it is recorded instead.
   (WKWebView/ObjC). Freeze `application/` + `bridge/` API before starting.
 - [ ] **Phase 7 — Hardening**: `generator` auto-specs via `$for`
   compile-time reflection, app icons/packaging (cf. `v3/internal/packager`,
-  `nfpm`), `doctor-ng` equivalent, docs site (plan parked in
+  `nfpm`), `doctor-ng` equivalent, docs site (planned in
   `docs/site/PLAN.md`: English LTR, static export to GitHub Pages via
-  `veb` SSG; build starts only after all phases/tracks are done).
+  `veb` SSG, deployed by its own `docs.yml`).
+  - **The gate was rewritten 2026-10-04, because the old one could never be
+    met.** It said the build starts "only after all phases/tracks are done",
+    and this file's own table says ≈52 focused days remain with two tracks
+    parked on decisions that are not ours (X0 waits on a Vinix "yes", U1–U4
+    wait on a distribution channel). Parking until everything is finished is
+    an expectation with no end. The gate is now **stability, not completion**:
+    start once `CONTEXT.md`, `cli/vails.v` and `vails.json` have stopped
+    moving, and build incrementally alongside the tracks — which is also why
+    pages generated from source (`--help`, `v doc`, `.d.ts`) come first and
+    hand-written pages later.
+  - **Deployment is CI's job, and CI is not yet proven.** `docs.yml` is a
+    separate workflow rather than a step in `ci.yml`, because the site's build
+    is fast, cannot fail the desktop build, and should be gated on
+    `paths:` — but publishing on an unproven gate is worse than one unproven
+    gate, so the order is explicit: `ci.yml` reports one green run first, then
+    `docs.yml`, then the `veb` spike. `PLAN.md` §7 carries the workflow shape
+    and the four decisions (`-prod` so a template error breaks CI rather than
+    a visitor, `dist/` gitignored rather than a `gh-pages` branch, `404.html`
+    for Pages' own error path, and `llms.txt` written into the artifact
+    because header negotiation is not dependable behind a CDN).
 
 ## Tauri-inspired track (approved; runs after Phase 2, interleaved below)
 
