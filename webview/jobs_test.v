@@ -157,9 +157,30 @@ fn test_post_to_main_refuses_a_window_with_no_wakeup() {
 	post_to_main(c, fn [mut ran] () { ran.count++ }) or { why = err.msg() }
 	assert ran.count == 0
 	assert why.contains('post_to_main')
-	assert why.contains('wakeup')
+	// The refusal NAMES the half that is missing, and which half that is differs
+	// by platform — so the word differs and one fixed word cannot assert both.
+	//
+	// Windows subclasses the window, and the subclass IS the wakeup, so a window
+	// that could not be subclassed has a queue nothing will ever drain. Linux has
+	// no wakeup at all: there is no half of one, because the g_idle_add seam that
+	// would own it is unwritten (ADR-0019), and post_to_main refuses outright
+	// rather than pretending to queue.
+	//
+	// Asserting 'wakeup' unconditionally is what made this file fail on Linux, and
+	// simply dropping the line would have been the other mistake: a check that
+	// cannot fail on one platform is not a weaker check, it is no check. Each
+	// branch below asserts its own platform's actual message, including the
+	// 'linux' spelling that distinguishes the deliberate branch from the generic
+	// "not available on this platform" fallback.
+	$if windows {
+		assert why.contains('wakeup')
+	} $else $if linux {
+		assert why.contains('linux')
+		assert why.contains('g_idle_add')
+	}
 	// And it refused BEFORE queueing, so the queue is not holding a job that
-	// nothing will ever run.
+	// nothing will ever run. This is the platform-neutral half of the property and
+	// it is asserted everywhere.
 	assert mt.queue.jobs.len == 0
 	mt.destroy()
 }

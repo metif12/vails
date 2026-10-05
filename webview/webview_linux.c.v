@@ -30,6 +30,15 @@ fn C.vails_message_body(result voidptr) &char
 fn C.vails_add_runtime(manager voidptr, js &char)
 fn C.g_free(mem voidptr)
 
+// F0's last-window rule (the Linux half). Both live in webview_linux_shim.h -
+// they are `static inline` there, which is why gcc cannot see them from here
+// until they are declared: an `#insert`-ed header provides definitions, and V
+// still needs to be told each signature it calls. Declaring the pair is what
+// makes `destroy_cb` and `run_linux` compile; neither function existed in this
+// list before the multi-window work, and the C half was written first.
+fn C.vails_window_opened()
+fn C.vails_window_closed()
+
 fn C.gtk_init(argc &int, argv &&char)
 fn C.gtk_main()
 fn C.gtk_main_quit()
@@ -68,8 +77,7 @@ fn C.gtk_widget_get_visible(widget voidptr) int
 // after gtk_widget_show_all.
 fn C.gtk_widget_get_window(widget voidptr) voidptr
 
-// GTK_ORIENTATION_VERTICAL (1) and GDK_WINDOW_TYPE_HINT (0) as literals
-// (AGENTS.md §2). gtk_window_new is called with 0, which is GTK_WINDOW_TOPLEVEL.
+// GTK_ORIENTATION_VERTICAL and GTK_WINDOW_TOPLEVEL as literals (AGENTS.md §2).
 const gtk_orientation_vertical = 1
 const gtk_window_toplevel = 0
 
@@ -97,11 +105,16 @@ fn js_trampoline() {}
 // and C never dereferences it - it only ferries the pointer back to the
 // callback. Heap-allocated, freed after gtk_main returns.
 struct DispatchCtx {
-	view    voidptr
-	router  &bridge.Router
-	label   string
-	reg     capabilities.Registry
-	runtime string
+	view   voidptr
+	router &bridge.Router
+	label  string
+	reg    capabilities.Registry
+	// `runtime` used to be a fifth field here, carrying the injected bridge
+	// source per window. Nothing ever read it — `message_cb` uses `view`,
+	// `router`, `label` and `reg` and never the script text, because the
+	// script goes to WebKit as a user script at build time
+	// (vails_add_runtime) and is not needed again. It was dead the whole time
+	// it was here, and only the Linux run could have said so.
 }
 
 // message_cb is the single JS->V entry point on Linux. It runs on the GTK main
@@ -146,9 +159,13 @@ fn message_cb(result voidptr, data voidptr) {
 // is one context per window, each carrying ITS OWN label, which is what makes
 // a command called from the settings window gated against the settings
 // window's capabilities (F0 makes that load-bearing).
-fn build_linux_window(cfg Config, win &Window) &DispatchCtx {
-	// GTK_WINDOW_TOPLEVEL == 0
-	window := C.gtk_window_new(0)
+fn build_linux_window(cfg Config, mut win &Window) &DispatchCtx {
+	// The named constant, not a bare 0. This call used to pass the literal with
+	// `// GTK_WINDOW_TOPLEVEL == 0` written above it, which left
+	// `gtk_window_toplevel` declared and never referenced anywhere in the
+	// repository — a constant that exists to name a magic number, defeated by
+	// the one call site that should have used it.
+	window := C.gtk_window_new(gtk_window_toplevel)
 	if window == unsafe { nil } {
 		return unsafe { nil }
 	}
@@ -181,7 +198,10 @@ fn build_linux_window(cfg Config, win &Window) &DispatchCtx {
 			free(ctx)
 			return unsafe { nil }
 		}
-		C.vails_add_runtime(manager, label_js(bridge.runtime_js(), cfg.label))
+		// `.str` because vails_add_runtime takes a `&char`: label_js returns a
+		// V string, and handing a V string where a C char pointer is wanted is
+		// the mismatch webview_windows.c.v:348 already spells the same way.
+		C.vails_add_runtime(manager, label_js(bridge.runtime_js(), cfg.label).str)
 		C.g_signal_connect_data(window, c'destroy', voidptr(destroy_cb), nil, nil, 0)
 	}
 	// The webview goes into a vertical box rather than straight into the
@@ -265,11 +285,11 @@ fn run_linux(cfgs []Config) ! {
 	// Build them all before the loop starts: on_ready for window 2 must not run
 	// while window 1's loop is already spinning, and GTK wants every window
 	// realized before the first iteration.
-	contexts := []&DispatchCtx{}
+	mut contexts := []&DispatchCtx{}
 	for cfg in cfgs {
-		win := reg.find(cfg.label)
+		mut win := reg.find(cfg.label)
 		C.vails_window_opened()
-		ctx := build_linux_window(cfg, win)
+		ctx := build_linux_window(cfg, mut win)
 		if ctx == unsafe { nil } {
 			// Roll the counter back: a run that never reaches gtk_main must
 			// not leave the process believing a window is still open.

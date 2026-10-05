@@ -234,32 +234,30 @@ pub fn drop_files_data(paths []string) string {
 	return '{"paths":[' + items.join(',') + '],"count":' + paths.len.str() + '}'
 }
 
-// on_drop_message is the handler the window seam calls. A plain function (not a
-// closure) so the install site reads the same on every platform.
+// ## Where the message handler lives, and why it is not in this file
 //
-// It consumes exactly the messages `decide` says are the drop's, and it reads
-// the DROPFILES handle on none other. Reading lParam as an HDROP for a message
-// that is not WM_DROPFILES would hand the shell API a pointer to whatever the
-// message's lParam happened to be, so `is_drop_message` is asked first and the
-// question is not "was it a drop" but "whose handle is this".
+// `on_drop_message` used to be here, and it could not be: the one thing it does
+// that this file cannot is read an HDROP, and `read_dropped_paths_native` exists
+// only in `drop_windows.c.v`. A platform-neutral module may not name a platform
+// function at all, so this was not one broken function - it was the whole `services`
+// module failing to compile on Linux.
 //
-// A failed emit fails the handler, which the host treats as consumed: a drop the
-// frontend never hears about is a drop the user is still holding files for, and
-// there is nothing useful to pass on to a window procedure that does not know
-// what a DROPFILES handle is.
-fn on_drop_message(st &DropState, e webview.HostEvent) !bool {
-	if decide_drop(e, 0) == .pass_on {
-		return false
-	}
-	// The native read releases the handle as part of reading it, on every path
-	// including an error - an unreleased HDROP is a shell resource leak per drop,
-	// and a drop is something a user can do a hundred times an hour.
-	paths := read_dropped_paths_native(e.lparam) or {
-		return error('drop: could not read the dropped paths: ' + err.msg())
-	}
-	st.ctx.emit(event_drop_files, drop_files_data(validate_dropped_paths(paths)))!
-	return true
-}
+// It lives in `drop_windows.c.v` now, beside its only caller and its only platform
+// dependency. `menu_windows.c.v`'s `on_bar_command` is the same arrangement for the
+// same reason: a handler that reads a Windows message belongs to that platform's
+// backend.
+//
+// `tray.v` looks like the counter-example and is not. Its `on_host_message` can
+// stay neutral because a tray backend *exists on Linux*, so there is a message to
+// handle on both sides. The drop service has no Linux half by choice (see
+// `drop_linux.c.v`), so a neutral handler would have nothing to be neutral about.
+//
+// Everything testable stayed here on purpose. `decide_drop`,
+// `validate_dropped_paths` and `drop_files_data` are the entire policy, all three
+// are pure V, and all three stay covered on both platforms by `drop_test.v`. What
+// moved is the one function that needs an HDROP - and so cannot be tested on a
+// machine without one, which is the honest reason it was the wrong side of the
+// line to begin with.
 
 // enable_drop starts accepting drops on this window and installs the seam.
 //
