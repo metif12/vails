@@ -13,10 +13,48 @@ an ADR, not here.
 |---|---|
 | `v test .` on Windows | **37/37 test files green**, excluding `webview` (below). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. Re-measured 2026-10-04 across all 16 non-webview modules. |
 | `v test webview` on Windows | **cannot be run**: it takes the host down. Measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with **no OOM in the Windows event log**. All six `webview` test files *compile* (`v -o`, no run). |
-| `v test .` on Linux | 32/32 as of 2026-09-28. **Stale**: not re-measured since ADR-0034/0035, and this repo does not have a Linux runner. Treat as "was green", not "is green". |
+| `v test .` on Linux | **20 of 43 test files FAIL** — measured 2026-10-05 in the CI container, the first time this has ever been run. `webview` (6 files) **compiles and runs** here, which is the coverage Windows cannot give, and it finds 7 distinct errors in `webview_linux.c.v`. `services/drop.v:257` calls `read_dropped_paths_native`, which exists only on Windows, so the module does not compile at all. `buildplan_test.v` expects `-cc gcc` in the app flags and Linux does not emit it. |
 | Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
-| Next by the table | **F0's proof run is DONE** (below). Next: **one green `ci.yml` run**, then F1, then W1–W4 |
-| Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6), and **a `ci.yml` that has never reported a green job** |
+| Next by the table | **CI runs now** (below). Next: the 20 Linux failures, then F1, then W1–W4 |
+| Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
+
+**CI NOW RUNS JOBS.** On 2026-10-05 this stopped being a claim. Two distinct
+causes had been producing the identical "0s, zero jobs" symptom, and only the
+second was the one the guard was written for:
+
+- **`webview_dispatch`… no — a YAML escape.** `ci.yml` line 112 read
+  `run: "C:\msys64\ucrt64\bin" | …`. A YAML **double-quoted scalar** processes
+  backslash escapes, `\m` is not one, so the file was not valid YAML at all and
+  GitHub rejected it wholesale. Fixed with a `run: |` block.
+- **That is the second time**, and the first was the indentation break that
+  `eef60e2` fixed. So the guard added for the first — three green tests asserting
+  line positions — was green throughout while GitHub could not load the file. Its
+  header argued "the failure is textual, so the property is textual too"; line
+  position is textual, **what happens inside a scalar is not**. A fourth test now
+  covers the defect that actually shipped, and its scope is stated rather than
+  implied: it catches backslash-in-double-quotes, and it is **not** a YAML
+  parser. A real parse belongs in CI — which is the thing that has to survive to
+  reach it.
+
+The first real run then failed at both jobs' first substantive step, which is the
+useful outcome: `linux` on `E: Unable to locate package libwebkit2gtk-4.1-dev`,
+`windows` on `No package found matching input criteria` from `winget`. Both fixed
+from their measured causes — the Dockerfile's base is now a pinned
+`ubuntu:24.04` (the old `thevlang/vlang:ubuntu-build` tag descends from Debian
+10 **Buster**, EOL, whose archive has no 4.1; and the image overwrote
+`/opt/vlang` by building V from source anyway, so the base only ever supplied a
+distro), and Windows installs the **pinned 0.5.2 release zip** instead of a
+winget package that does not exist. The Dockerfile change was verified by
+building the image and running the suite in it, not by pushing it.
+
+**Which means the Linux backlog is now visible, and it is large.** 20 failing
+files is not a list of flaky tests: `webview/webview_linux.c.v` has seven
+distinct compile errors (two undeclared C functions, a `string`/`&char`
+mismatch, four `mut` errors), `services/drop.v` references a Windows-only
+function from platform-neutral code so the whole module fails, and
+`buildplan_test.v` asserts a flag shape Linux does not produce. Every one of
+these was shipped with the Linux side marked "stale, treat as was-green", and
+stale was the correct word: nobody had run it.
 
 **F0 is proven on Windows.** `examples/multiwindow` with
 `VAILS_MULTIWINDOW_PROBE=pings` brings up two windows, each showing its own label
@@ -329,6 +367,10 @@ item that would trigger it is recorded instead.
   `nfpm`), `doctor-ng` equivalent, docs site (planned in
   `docs/site/PLAN.md`: English LTR, static export to GitHub Pages via
   `veb` SSG, deployed by its own `docs.yml`).
+  - **The "one green ci.yml run" precondition is MET as of 2026-10-05** — jobs
+    run, and both fail at a named step. "Green" is still ahead, but it is now a
+    reachable state rather than an unknown one, which is what the docs build was
+    waiting on.
   - **The gate was rewritten 2026-10-04, because the old one could never be
     met.** It said the build starts "only after all phases/tracks are done",
     and this file's own table says ≈52 focused days remain with two tracks

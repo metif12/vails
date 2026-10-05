@@ -75,10 +75,32 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install V
-        # The published release rather than a source build: this step
-        # must not depend on MSYS2, which the next step installs, and V's
-        # own `make` on Windows is not what this job is here to test.
-        run: winget install --id=VLang.V --accept-source-agreements --accept-package-agreements --silent
+        # THE PINNED RELEASE ZIP, NOT winget. `winget install --id=VLang.V`
+        # fails with "No package found matching input criteria" - there is no
+        # such package in the winget source (measured 2026-10-05, and reproduced
+        # against the runner's own `winget search VLang`, which returns nothing).
+        #
+        # Downloading the release is better than winget would have been anyway,
+        # for a reason that is not about winget: it PINS the compiler. Every
+        # other flag in this job is justified against a specific V - the
+        # `-ldflags "-lws2_32"` below is needed on 0.5.2 and unnecessary on
+        # master - so "whatever winget had this morning" made those comments
+        # untrue by construction. 0.5.2 is pinned to match them.
+        #
+        # It also does not depend on MSYS2, which the next step installs, and
+        # that constraint is unchanged from the winget version: V's own `make`
+        # on Windows is not what this job is here to test.
+        run: |
+          $ver = '0.5.2'
+          $zip = Join-Path $env:RUNNER_TEMP 'v_windows.zip'
+          $dest = Join-Path $env:RUNNER_TEMP 'vlang'
+          Invoke-WebRequest -Uri "https://github.com/vlang/v/releases/download/$ver/v_windows.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          # The archive contains a top-level `v/` directory, so v.exe and vlib/
+          # end up as SIBLINGS inside it: $dest\v\v.exe and $dest\v\vlib\.
+          # Putting $dest\v on PATH is therefore what makes `v` resolve.
+          $vbin = Join-Path $dest 'v'
+          "$vbin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: This compiler can build this repo
         # A smoke step, and it exists because of a measured failure mode rather
@@ -90,13 +112,22 @@ jobs:
         # affected in one way or another (one lacked json2, the other needed
         # -enable-globals). A version check here turns "CI is red for a reason
         # nobody can see" into one line of output.
+        #
+        # ONE Split-Path, not two, and the reason is the layout: v.exe sits in
+        # the same directory as vlib/ (the step above puts $dest\v on PATH), so
+        # one level up from v.exe IS the vroot. The previous two-level form was
+        # only correct for a layout where v.exe lives in a bin/ beside vlib/, and
+        # it happened to pass on the machine this was written on purely because
+        # that machine's `v` is a .bin\v.bat forwarder - which is exactly the
+        # kind of coincidence that stops being true on a fresh runner.
         run: |
           v version
-          if (-not (Test-Path (Join-Path (Split-Path (Split-Path (Get-Command v).Source)) 'vlib\json2'))) {
-            Write-Error "this V has no vlib\json2, and bridge/ and state/ import it - install a newer V (V master has it; see AGENTS.md 1b)"
+          $vroot = Split-Path (Get-Command v).Source
+          if (-not (Test-Path (Join-Path $vroot 'vlib\json2'))) {
+            Write-Error "no vlib\json2 under $vroot - bridge/ and state/ import json2, so this V cannot build this repo. Pinned V version is 0.5.2; a newer V has it (see AGENTS.md 1b)"
             exit 1
           }
-          Write-Output "json2 present"
+          Write-Output "json2 present under $vroot"
 
       - name: Install MSYS2 ucrt64 + the webview packages
         run: |
