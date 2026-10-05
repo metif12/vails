@@ -34,14 +34,15 @@ affected, so this is not one command's bug: it is the dev server's `import dev`
 full bisection table and a two-import minimal reproduction are in **AGENTS.md
 §1b**.
 
-**The trigger is narrower than "add `net.http`", and the first version of this
-note was wrong about it.** `net.http` on its own is innocent: decoding a
-2-field struct with `json2` + `net.http` works, and so does decoding a struct
-that is a field-for-field copy of `VailsConfig`. What breaks is a decode
-instantiated in a module *other than* the one importing `net.http`. Two cells
-pin it down, each removing one condition and turning the failure into a pass:
-the same type with `net.http` removed decodes fine, and a same-shaped type
-declared in `main` decodes fine with `net.http` present.
+**The trigger is two specific conditions, and two earlier versions of this note
+were wrong about it.** "`json2` + `net.http`" is not enough — decoding a 2-field
+struct with `net.http` works, and so does decoding a struct that is a
+field-for-field copy of `VailsConfig`. What breaks is a decode of a type declared
+in a module named **`config`**, in a binary that links `net.http`. Two controls
+pin it: removing `net.http` makes it pass, and renaming the module to `other`
+makes it pass. `conf`, `configx` and `xconfig` all work, so it is the exact
+identifier rather than a prefix rule. `time` and `sync` do not trigger it;
+`net.http` does, and merely being *linked* is enough even unused.
 
 Three things worth remembering about it:
 
@@ -57,14 +58,15 @@ Three things worth remembering about it:
   `config`**. Same lesson as `workflow_test.v` and `bom_test.v`, one level up:
   the suite is green and the property it appears to cover is exercised nowhere.
 - **It is upstream.** `json2` was three days old on `vlang/v` master
-  (2026-10-03) and this is a cross-module codegen interaction, so the fix is a V
-  bug report, not a Vails patch. It joins a family the maintainers are already
-  working on: #28936 and #29156 are both "a same-named type in one module uses
-  the generated C symbol of another module's" in `json2`, and the silent-wrong-
-  result shape here is what that looks like when the wrong function is called.
-  The workaround that would unblock the CLI is to keep `net.http` out of the
-  binary that reads config, which means `vails run` spawning a separate helper
-  process — a real restructure, not done.
+  (2026-10-03) and this needs an unusual combination to bite, so the fix is a V
+  bug report, not a Vails patch. Filed as [vlang/v#29508](https://github.com/vlang/v/issues/29508),
+  with the module-name sweep as the evidence. Note that master has already moved
+  past the compiler this was measured on (`bb0d229` → `3c5f448`) and none of the
+  five intervening commits touch `vlib/json2`, so the report asks for
+  re-confirmation rather than claiming current-master breakage. The workaround
+  that would unblock the CLI is to keep `net.http` out of the binary that reads
+  config, which means `vails run` spawning a separate helper process — a real
+  restructure, not done.
 
 **CI NOW RUNS JOBS.** On 2026-10-05 this stopped being a claim. Two distinct
 causes had been producing the identical "0s, zero jobs" symptom, and only the

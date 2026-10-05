@@ -104,110 +104,115 @@ So **no released V can build this repository.** `bridge/` and `state/` import
 `json2`, and a released compiler fails with
 `builder error: cannot import module "json2" (not found)`.
 
-#### On V master, `json2` silently decodes to a ZERO struct when `net.http` shares the binary with a cross-module type
+#### On V master, `json2.decode` silently returns a ZERO struct when a module named `config` shares the binary with `net.http`
 
 Measured 2026-10-05 on master `bb0d229`. **This is the most dangerous item in
 this file**, because it produces *wrong data and no error*: `json2.decode[T]`
 returns a **zero-valued `T`** rather than failing, so whatever validates the
 result complains about a field it never received.
 
-**Read the trigger before you trust it — the first version of this note was
-wrong, and wrong in the useful direction.** It originally said "`json2` +
-`net.http` is the broken combination". That is **not** what is happening: the
-import alone is innocent. The trigger needs a *third* thing.
+**Two earlier versions of this note were wrong, and both corrections matter more
+than the claim.** The first said "`json2` + `net.http` is the broken
+combination"; the second said "the trigger is a cross-module decode". Both were
+generalizations from cells I had not isolated, and both were refuted by cells I
+had built but not varied. The version below is the one that survives its own
+controls.
 
-Here is the whole thing, as nine standalone cells with no Vails code in the
-deeper ones. Every row was built and run on this machine's compiler.
+**The trigger is two conditions together, and both are load-bearing:**
 
-| # | binary contains | `decode` target declared in | result |
-|---|---|---|---|
-| A | `json2` | `main`, 2 fields | works |
-| B | `json2` + `net.http` | `main`, 2 fields | works |
-| I | `json2` + `os` + `net.http` | `main`, field-for-field copy of `VailsConfig` | works |
-| G | `json2` + `os` + `config` | **`config`** (`config.VailsConfig`) | works |
-| **H** | `json2` + `os` + **`net.http`** + `config` | **`config`** | **zero struct, NO error** |
-| E | `config` (via `config.load`) | `config` | works |
-| **F** | `config` + **`net.http`** (via `config.load`) | `config` | **zero struct** |
+1. the module declaring the decoded type is named **`config`**, and
+2. **`net.http`** is linked into the same binary.
 
-So the trigger is the conjunction, and all three parts are load-bearing:
+Verified deterministic: 6 builds of the failing program printed an empty name
+every time, with no error and exit 0.
 
-1. **`net.http` is linked into the binary**, and
-2. **`json2.decode` is instantiated in a module other than the one importing
-   `net.http`**, and
-3. **the type being decoded does not matter.** `CfgLocal` in cell I has the
-   same shape as `VailsConfig` and works; `VailsConfig` itself fails. What
-   matters is *which module* it came from, not what it contains.
+What is *not* the trigger, each row a separate binary with the same two-field
+struct and the same JSON bytes:
 
-Cells I and G are the pair that pins it down: each removes exactly one of the
-three conditions and turns the failure into a pass.
+| variable varied | values | result |
+|---|---|---|
+| module name (with `net.http`) | **`config`** | **ZERO, no error** |
+| | `other`, `conf`, `configx`, `xconfig`, `mymod` | works |
+| | (`cfg`) | fails to *build* — unchased, see note below |
+| `net.http` (module `config`) | absent | works |
+| | `time`, `sync` instead | works |
+| | **`net.http`** | **ZERO, no error** |
+| struct shape (module `config`) | 2 fields | **ZERO** |
+| | a field-for-field copy of `VailsConfig` | **ZERO** |
+| struct shape (module `other`) | 2 fields, or the same full copy | works |
 
-Minimal reproduction — two imports, one decode, no Vails code:
+Two consequences worth internalising:
 
-```v
-module main
+- **The struct is irrelevant, and the module name is everything.** A copy of the
+  real 6-field `VailsConfig` declared in a module named `other` decodes fine; a
+  2-field struct in a module named `config` does not. So "cross-module" and
+  "struct complexity" were both the wrong axis — the first version of this note
+  was confident about the second one, having never built a minimal struct in a
+  minimal module.
+- **It is `net.http` specifically, not "a second module".** `time` and `sync` in
+  the same binary change nothing. And *linking* is what matters, not *use*: the
+  `net.http` import in the reproduction is unused, V warns about it, and the
+  decode is still wrong.
 
-import json2
-import os
-import net.http
-import othermod          // declares `pub struct Cfg`
+Minimal reproduction, verified 6/6 — note that a module is a **subdirectory**
+when a `v.mod` is present, which is the second thing my first attempt got wrong:
 
-fn main() {
-    txt := os.read_file('data.json') or { panic(err.msg()) }
-    cfg := json2.decode[othermod.Cfg](txt) or {
-        eprintln(err.msg())   // never printed
-        return
-    }
-    println(cfg.name)         // prints empty
-}
+```
+v.mod  ->  Module { name: 'repro'  dependencies: [] }
+config/config.v  ->  module config ; pub struct Cfg { pub mut: name string  n int }
+main.v  ->  import json2 / import os / import net.http / import config
+            json2.decode[config.Cfg](os.read_file('data.json')!)
+data.json  ->  {"name": "vails", "n": 3}
 ```
 
-Ruled out by measurement, not assumption: not the two `cli_flags` (a build with
-both still fails); not module count; not struct complexity (cell I); not the
-import itself (cell B); not the JSON bytes — the same file decodes correctly in
-G and H; and no module imports the old `json`.
+A lead on the cause, recorded because it is cheap and offered as a **hypothesis,
+not a diagnosis**: the failing and passing builds both emit
+
+```c
+config__Cfg result = (config__Cfg){.name = _str_36};
+```
+
+but define `_str_36` differently — `{"", 0, 1}` in the failing build, a long
+unrelated `array.ensure_noscan` message in the passing one. So the same
+`_str_N` index names different literals in the two programs, which is consistent
+with a collision or a numbering computed over a differing module set. Nobody has
+diffed the symbol tables yet.
+
+Also unchased, and deliberately not claimed: a module named **`cfg`** failed to
+build three times in a row in the same harness where every other name built.
 
 **Consequence for this repository: the `vails` CLI cannot read `vails.json`.**
 `vails doctor`, `vails run`, `vails build` and `vails dts` all report
 `vails.json: name must not be empty` on a perfectly valid project. `dev/dev.v`
-and `dev/serve.v` are the only `net.http` importers, and `cli` imports `dev` for
-`vails run`'s dev server — that one import is the whole exposure.
+and `dev/serve.v` are the only `net.http` importers, `cli` imports `dev` for
+`vails run`'s dev server, and this repository's config module is named `config`
+— so all three conditions are met by construction, and that one import is the
+whole exposure.
 
 **Why `v test .` is 45/45 green and still cannot see this:** every `_test.v` file
-is its own binary, and **no test file imports both `dev` and `config`**
-(`dev_test.v` is `module dev` and imports only `capabilities` and `os`). The one
-import set that breaks is never linked in a test. `buildplan/json2_import_test.v`
-guards the *precondition* textually instead — it cannot assert the bug, because a
-test that reproduces it would only pass while the compiler is broken — but no
-test here can catch a regression in the decode itself. This is the §2c lesson at
-suite scale: a green check that cannot fail.
+is its own binary, and **no test file links `dev` with `config`**
+(`dev_test.v` is `module dev` and imports only `capabilities` and `os`).
+`buildplan/json2_import_test.v` guards the *precondition* textually instead — it
+cannot assert the bug, because a test that reproduces it would only pass while
+the compiler is broken — but no test here can catch a regression in the decode
+itself. This is the §2c lesson at suite scale: a green check that cannot fail.
 
 Practical rules until this is fixed or filed:
 
-- Do not trust `config.load` (or any `json2.decode`) in a binary that also links
-  `net.http`. `vails doctor` reaching `vails.json : INVALID` is this bug, not a
-  bad config.
-- The check that matters when reading a decode result is whether the *decoding
-  module* also imports `net.http`. If it does not, the result is trustworthy
-  even when some other module in the binary does.
+- Do not trust `config.load` (or any `json2.decode` in a module named `config`)
+  in a binary that also links `net.http`. `vails doctor` reaching
+  `vails.json : INVALID` is this bug, not a bad config.
+- The check that matters is whether **the decoding module is named `config`**
+  and **its binary links `net.http`**. Neither condition alone does anything.
 - Anything that must read `vails.json` outside a test belongs in a module that
   does not import `dev`.
 - The checked-in `examples/*/frontend/vails.d.ts` files cannot be regenerated
   with `vails dts` for this reason; they were last generated before the move to
   master and say so in their header ("do not edit").
 
-Two consequences, and the first one inverted a decision:
-
-1. **The Windows CI job cannot be pinned to a release.** Pinning was the right
-   instinct — every other flag there is justified against a specific V — but the
-   only pin that works is a `vlang/v` *commit*, which means building V from source
-   on the runner. MSYS2 then has to be installed **before** V, because V's own
-   Windows build needs a C compiler. Not done.
-2. **"Install a newer V" is not a complete instruction.** Newer *released* V does
-   not help. What helps is a V built from master.
-
-The trap this sits in: a machine with a master checkout builds fine, so the
-dependency looks satisfied locally, and the failure only appears on a fresh
-machine — which is what CI is for.
+Upstream: [vlang/v#29508](https://github.com/vlang/v/issues/29508). Note that
+master has moved past the compiler this was measured on (`bb0d229` → `3c5f448`)
+and the fix is not ours to make.
 
 #### Two history worth keeping, because both cost an afternoon
 

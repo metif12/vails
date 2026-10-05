@@ -593,45 +593,43 @@ Conventions for this file:
 
 - **The `vails` CLI cannot read `vails.json`.** This is a V master bug, not a
   Vails one: on `vlang/v` master, `json2.decode[T]` returns a **zero-valued
-  struct with no error** when the binary also links `net.http` **and the decode
-  is instantiated in a module other than the one importing `net.http`**.
-  `cli` imports `dev` (which imports `net.http`), so `vails doctor`, `vails run`,
-  `vails build` and `vails dts` all report `vails.json: name must not be empty`
-  on a project whose config is valid.
+  struct with no error** when the module declaring `T` is named `config` **and**
+  `net.http` is linked into the same binary. `cli` imports `dev` (which imports
+  `net.http`), and this repository's config module is named `config`, so
+  `vails doctor`, `vails run`, `vails build` and `vails dts` all report
+  `vails.json: name must not be empty` on a project whose config is valid.
 
-  Seven-cell bisection, each cell built and run separately; the full table is in
-  `AGENTS.md` §1b. **Note the middle of that table, because the obvious reading
-  is wrong:** adding `net.http` to a program that decodes a 2-field struct
-  **works**, and so does decoding a field-for-field copy of `VailsConfig` that
-  is declared in `main`. Only the *combination* with a cross-module decode fails.
-  A first pass at this concluded "`net.http` is the trigger" and wrote that down;
-  it was refuted by cell B.
+  Bisected one variable at a time; the full table is in `AGENTS.md` §1b, and the
+  upstream report is [vlang/v#29508](https://github.com/vlang/v/issues/29508).
+  **Two claims had to be withdrawn along the way, and both mattered:**
 
-  Two consequences worth stating plainly:
+  - *"the trigger is a cross-module decode"* — refuted by a 2-field struct in a
+    module named `other`, which decodes fine with `net.http` linked.
+  - *"struct complexity is irrelevant"* — refuted in the other direction: the
+    module name is the axis. `conf`, `configx` and `xconfig` all work; `config`
+    does not. So it is the exact identifier, not a prefix rule.
 
-  - **`v test .` was 44/44 green and cannot catch this.** Each `_test.v` is its
+  Two further consequences worth stating plainly:
+
+  - **`v test .` is 45/45 green and cannot catch this.** Each `_test.v` is its
     own binary, and no test file imports both `dev` and `config`, so the one
-    import set that breaks is never linked in a test.
+    combination that breaks is never linked in a test.
   - **The checked-in `examples/*/frontend/vails.d.ts` files cannot be
     regenerated**, so they are one release behind the generator: the
     blocking-command JSDoc described under **Changed** is in `services/dts.v`
     but **not yet in those three files**. They must not be hand-edited, which is
     why this is listed rather than patched.
 
-  **`buildplan/json2_import_test.v` now guards the shape of the exposure**, and
-  it is the guard this entry needed all along. It cannot assert the bug itself
-  (that would mean a test which passes only by reproducing a compiler bug, and
-  which the V fix turns red), so it asserts the *precondition* instead:
-  `net.http` still has exactly one importer, that importer and every
-  `json2.decode` instantiator stay **disjoint**, and `cli` is still the one place
-  the two meet. A second `net.http` importer, or a `net.http` import landing in a
-  decoding module, now goes red at review time instead of shipping a command
-  that reports a valid config as invalid.
+  `buildplan/json2_import_test.v` guards the shape of the exposure — `net.http`
+  keeps exactly one importer, that importer and every `json2.decode`
+  instantiator stay **disjoint**, and `cli` is still where the two meet — so the
+  combination cannot be widened without a red test. It cannot assert the bug
+  itself: a test that reproduces it would pass only while the compiler is broken
+  and would go red on the fix.
 
-  Fixing it means either an upstream V report (the right fix; `json2` was three
-  days old on 2026-10-03, and #28936 / #29156 are the same cross-module-symbol
-  family in `json2`) or keeping `net.http` out of the binary that reads config,
-  which means `vails run` spawning a helper process. Not done.
+  Fixing it is upstream's. Locally the only way to unblock the CLI is to keep
+  `net.http` out of the binary that reads config, which means `vails run`
+  spawning a helper process. Not done.
 - **`menu.set_menu` is unproven at runtime on Windows.** It compiles and links,
   and the pure-V classifier behind it (`bar_click`) is unit-tested on every
   platform, but the E2E window would not come up in the capture session, so

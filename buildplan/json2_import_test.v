@@ -7,23 +7,25 @@ import os
 //
 // ## The bug
 //
-// Measured 2026-10-05 on V master `bb0d229`: with `net.http` linked into a
-// binary, `json2.decode[T]` returns a **zero-valued `T` and no error** if the
-// decode is instantiated in a module other than the one importing `net.http`.
+// Measured 2026-10-05 on V master `bb0d229`: `json2.decode[T]` returns a
+// **zero-valued `T` and no error** when the module declaring `T` is named
+// `config` AND `net.http` is linked into the same binary. Neither condition
+// alone does it, and the controls are in AGENTS.md section 1b: removing
+// `net.http` makes it pass; renaming the module to `other`, `conf`, `configx` or
+// `xconfig` makes it pass; `time` and `sync` in place of `net.http` make it
+// pass; and the struct's shape is irrelevant (2 fields fail exactly like a copy
+// of VailsConfig).
 //
-// The bisection, one cell per binary (AGENTS.md §1b has the full table):
+// An earlier version of this comment claimed the trigger was "a cross-module
+// decode". It is not - a 2-field struct in a module named `other` decodes fine
+// with net.http linked. And an even earlier claim, "net.http is the trigger", was
+// refuted the same way. Both were generalisations from a cell I had not isolated.
 //
-//   json2 alone, type in main ............................ works
-//   json2 + net.http, type in main ...................... works   <- the trap
-//   json2 + net.http, type declared in main (same shape) . works   <- the trap
-//   json2 + config,  decode of config's own type ......... works
-//   json2 + net.http + config, same decode ............... ZERO, no error
-//
-// So neither half is sufficient, and the shape of the defect is entirely
-// cross-module. In this repository `dev` is the only `net.http` importer and
-// `cli` is the only module that links it to `config`, which is why `vails
-// doctor`, `vails run`, `vails build` and `vails dts` all report a valid
-// `vails.json` as "name must not be empty".
+// In this repository `dev` is the only `net.http` importer, `cli` is the only
+// module that links it to `config`, and the config module is named `config` -
+// so the shipped CLI satisfies all three conditions by construction, which is
+// why `vails doctor`, `run`, `build` and `dts` report a valid `vails.json` as
+// "name must not be empty".
 //
 // ## Why `v test .` never saw it
 //
