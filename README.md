@@ -54,14 +54,15 @@ Current state (all verified, not promised):
   frontend can ask first and a documented `bundle.identifier` as its
   AppUserModelID; compile-verified, runtime proof pending — see
   `docs/ADR/0018`), **`menu`** (native popup on both platforms; the
-  choice arrives as an event, never as the command's result) and
+choice arrives as an event, never as the command's result) and
   **`tray`** (Windows: a shell icon whose click reaches V through a comctl32
-  subclass — `webview/host.v` — and arrives as `tray:clicked`; E2E proof in
-  `tests/e2e_windows/tray.png`)
-- `v test .` green on **Windows** (36 test files) and on **Linux** (32 test
-  files as of 2026-09-28; the four new pure-V modules are OS-agnostic and
-  the Linux count has not been re-measured since — see
-  `tests/e2e_linux/README.md`)
+  subclass - `webview/host.v` - and arrives as `tray:clicked`; proven end to end
+  by the E2E script's `PostMessage` → subclass → `tray:clicked` check, which is
+  in `tests/e2e_windows/README.md` - no screenshot of it is committed, though an
+  earlier version of this line cited one)
+- `v test .` green on **Windows and Linux**, **44 test files each** (measured
+  2026-10-05; the Linux run was the first this project ever had, and it is what
+  found three real cross-platform defects - see `ROADMAP.md`)
 - Landed since: the window menu bar (`menu.set_menu`, ADR-0023), the tray menu
   (`tray.set_menu`, ADR-0026) and the GTK `dialog` (ADR-0027)
 - **The build track landed 2026-09-29 (ADR-0034)**: `vails build` produces a
@@ -199,20 +200,29 @@ cd vails
 v test .                                     # unit tests, all green, no windows opened
 ```
 
-**On Windows with gcc 16 the test command carries one extra flag, and it
-is not optional:**
+**On Windows with gcc the test command needs one flag, for the compiler, not for
+the tests:**
 
 ```powershell
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
-v -cc gcc test .    # 33 test files (`webview` is excluded; see the ROADMAP)
+v -cc gcc test .    # 44 test files, `webview` included
 ```
 
-The reason is a V 0.5.2 bug rather than a Vails one: `dev/` imports
-`net.http`, V's `dependency_scan_fallback` link path emits `#flag`-sourced
-`-l` flags *before* most object files, and GNU `ld` only resolves an
-archive against the objects that precede it — so `ws2_32` is on the link
-line and cannot resolve anyway. A `#flag` in the importing module does not
-help (`-ldflags` is emitted last); see ADR-0034 and `AGENTS.md` §1.
+The **reason** that flag is worth knowing: `dev/` imports `net.http`, V's
+`dependency_scan_fallback` link path emits `#flag`-sourced `-l` flags *before*
+most object files, and GNU `ld` only resolves an archive against the objects
+that precede it — so `ws2_32` is on the link line and cannot resolve anyway. A
+`#flag` in the importing module does not help (`-ldflags` is emitted last); see
+ADR-0034 and `AGENTS.md` §1.
+
+**But no link flag is needed today.** That paragraph is why the flags are
+*version-scoped*, not because they are wrong: on the V master build this project
+now requires (§1b of `AGENTS.md` — no released V can build it), `v -cc gcc test .`
+and the CLI both link clean with no `-ldflags` and no `-cflags`, measured across
+all 44 test files. If a build ever fails with `undefined reference to
+__imp_connect` or `__WSAFDIsSet`, add `-ldflags "-lws2_32"` back rather than
+hunting: `buildplan.cli_flags` still emits it precisely so that this stays a
+version difference and not a mystery.
 
 `v test .` never opens a window. GUI checks stay manual — see
 `tests/e2e_windows/README.md` and `tests/e2e_linux/README.md`.
@@ -439,7 +449,7 @@ v test .          # must be green on Windows AND on Linux
 Linux (WSL Ubuntu, the `v` there is not on `PATH`):
 
 ```sh
-wsl -d Ubuntu -- /root/vsrc/v test .        # 29/29
+wsl -d Ubuntu -- /root/vsrc/v test .        # 45/45 as of 2026-10-05
 wsl -d Ubuntu -- /root/vsrc/v -gc none -o services ./examples/services
 ```
 

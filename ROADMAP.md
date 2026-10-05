@@ -11,12 +11,60 @@ an ADR, not here.
 
 | | |
 |---|---|
-| `v test .` on Windows | **37/37 test files green**, excluding `webview` (below). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. Re-measured 2026-10-04 across all 16 non-webview modules. |
-| `v test webview` on Windows | **cannot be run**: it takes the host down. Measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with **no OOM in the Windows event log**. All six `webview` test files *compile* (`v -o`, no run). |
-| `v test .` on Linux | **20 of 43 test files FAIL** — measured 2026-10-05 in the CI container, the first time this has ever been run. `webview` (6 files) **compiles and runs** here, which is the coverage Windows cannot give, and it finds 7 distinct errors in `webview_linux.c.v`. `services/drop.v:257` calls `read_dropped_paths_native`, which exists only on Windows, so the module does not compile at all. `buildplan_test.v` expects `-cc gcc` in the app flags and Linux does not emit it. |
+| `v test .` on Windows | **45/45 test files green, `webview` included** — measured 2026-10-05. The claim in the row below turned out to be stale. No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. |
+| `v test webview` on Windows | **green as of 2026-10-05** — all six `webview` files compile *and* run, twice, inside a full `v -cc gcc test .` (45/45). This contradicts the measurement recorded here until today: **"cannot be run: it takes the host down"**, measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with no OOM in the Windows event log. **What changed is not known**: the tests needed no editing to pass, and the compiler is the same 0.5.2 master as both earlier measurements. So treat this as *currently green*, not *fixed* — if it starts taking the host down again, this row is the history and the F0 work since 2026-10-03 is the first thing to suspect. |
+| `v test .` on Linux | **45/45 test files green** — measured 2026-10-05 in the CI container, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. |
 | Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
-| Next by the table | **CI runs now** (below). Next: the 20 Linux failures, then F1, then W1–W4 |
+| Next by the table | **the Linux suite is green** (below). Next: F1, then W1–W4 |
+| **Build-blocked on** | **`vails.json` cannot be loaded by the built CLI** - a V master bug, not a Vails bug. Found 2026-10-05, not yet filed upstream. See below. |
 | Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
+
+**THE CLI CANNOT READ `vails.json`, AND `v test .` CANNOT SEE IT.** Found
+2026-10-05 while trying to regenerate the examples' `.d.ts` files, which had
+been quietly impossible since the move to V master. Every config-consuming
+command fails on a perfectly valid project:
+
+```
+vails doctor   ->   vails.json : INVALID (vails.json: name must not be empty)
+```
+
+`vails doctor`, `vails run`, `vails build` and `vails dts` are all
+affected, so this is not one command's bug: it is the dev server's `import dev`
+(which pulls in `net.http`) poisoning `json2.decode` for the whole binary. The
+full bisection table and a two-import minimal reproduction are in **AGENTS.md
+§1b**.
+
+**The trigger is narrower than "add `net.http`", and the first version of this
+note was wrong about it.** `net.http` on its own is innocent: decoding a
+2-field struct with `json2` + `net.http` works, and so does decoding a struct
+that is a field-for-field copy of `VailsConfig`. What breaks is a decode
+instantiated in a module *other than* the one importing `net.http`. Two cells
+pin it down, each removing one condition and turning the failure into a pass:
+the same type with `net.http` removed decodes fine, and a same-shaped type
+declared in `main` decodes fine with `net.http` present.
+
+Three things worth remembering about it:
+
+- **It returns a zero-valued struct and no error.** So the complaint is about a
+  field that was never read ("name must not be empty"), which sends you looking
+  at the config file instead of at the decoder. Every config in this repo is
+  valid — verified by reading them, not assumed. The primitive is `json2.decode`
+  itself: a direct `json2.decode[config.VailsConfig]` in a binary with
+  `net.http` returns an empty name with no error at all, which is worse than
+  the CLI symptom, because nothing downstream is in a position to catch it.
+- **`v test .` is 45/45 green and structurally cannot catch it**, because each
+  `_test.v` is its own binary and **no test file imports both `dev` and
+  `config`**. Same lesson as `workflow_test.v` and `bom_test.v`, one level up:
+  the suite is green and the property it appears to cover is exercised nowhere.
+- **It is upstream.** `json2` was three days old on `vlang/v` master
+  (2026-10-03) and this is a cross-module codegen interaction, so the fix is a V
+  bug report, not a Vails patch. It joins a family the maintainers are already
+  working on: #28936 and #29156 are both "a same-named type in one module uses
+  the generated C symbol of another module's" in `json2`, and the silent-wrong-
+  result shape here is what that looks like when the wrong function is called.
+  The workaround that would unblock the CLI is to keep `net.http` out of the
+  binary that reads config, which means `vails run` spawning a separate helper
+  process — a real restructure, not done.
 
 **CI NOW RUNS JOBS.** On 2026-10-05 this stopped being a claim. Two distinct
 causes had been producing the identical "0s, zero jobs" symptom, and only the
@@ -76,14 +124,28 @@ compiler that provably cannot build this repo, and says so in one named line
 instead of failing obscurely two steps later.** That is the smoke step working
 as designed, on a machine nobody had ever run it on.
 
-**Which means the Linux backlog is now visible, and it is large.** 20 failing
-files is not a list of flaky tests: `webview/webview_linux.c.v` has seven
-distinct compile errors (two undeclared C functions, a `string`/`&char`
-mismatch, four `mut` errors), `services/drop.v` references a Windows-only
-function from platform-neutral code so the whole module fails, and
-`buildplan_test.v` asserts a flag shape Linux does not produce. Every one of
-these was shipped with the Linux side marked "stale, treat as was-green", and
-stale was the correct word: nobody had run it.
+**And the Linux backlog that became visible is now closed: 44 of 44 green.** It
+began as 20 failing files, which is not a list of flaky tests but three distinct
+compilation defects, all shipped with the Linux side marked "stale, treat as
+was-green": `webview/webview_linux.c.v` had seven compile errors (two undeclared
+C functions, a `string`/`&char` mismatch, four `mut` errors), `services/drop.v`
+referenced a Windows-only function from platform-neutral code so the *whole*
+module failed, and `buildplan_test.v` asserted a flag shape Linux does not
+produce. Stale was the correct word for all three: nobody had run it.
+
+The fix is only interesting because of what it turned up on the way. The third one
+was not a bad assertion — it was `app_flags` reading the **host** OS instead of
+its `target` argument, so a Windows build plan could only ever be checked on a
+Windows machine. That is the exact half-checking that taking `Target` as a
+parameter exists to prevent, and the test written to catch it had been passing on
+Windows the whole time, because on Windows it cannot fail. **A platform-specific
+green is not a green**; it is a check that has never been exercised. The other
+two are the ordinary lesson repeated: the Linux backend was never compiled
+because only Windows ever compiled it.
+
+The lasting gain is coverage, not just colour: **the six `webview` test files run
+on Linux**, which Windows cannot do at all (there they take the host down), so
+`webview` now has the one platform where its tests are actually executed.
 
 **F0 is proven on Windows.** `examples/multiwindow` with
 `VAILS_MULTIWINDOW_PROBE=pings` brings up two windows, each showing its own label
@@ -1128,8 +1190,10 @@ a small platform nicety, or a non-goal with a reason attached.
   - **`buildplan/dispatch_test.v` guards both bugs**, textually, because no unit
     test can reach C: no `webview_dispatch` call anywhere in `webview/`, and no
     `if (!C.webview…)` negation of a zero-is-success error code. It lives in
-    `buildplan` rather than `webview` because `v test webview` takes this host
-    down, and a guard nobody can run is the "passes because its subject is
+    `buildplan` rather than `webview` because it was written when
+    `v test webview` took this host down (see "Where we are" — that is **no
+    longer true as of 2026-10-05**, and moving it is now allowed but not
+    required), and a guard nobody can run is the "passes because its subject is
     missing" failure `buildplan/workflow_test.v` already refuses. Verified the
     only way a guard can be trusted: **red** on a reintroduced call, naming the
     file and line, then green.

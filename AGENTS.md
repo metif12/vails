@@ -104,6 +104,97 @@ So **no released V can build this repository.** `bridge/` and `state/` import
 `json2`, and a released compiler fails with
 `builder error: cannot import module "json2" (not found)`.
 
+#### On V master, `json2` silently decodes to a ZERO struct when `net.http` shares the binary with a cross-module type
+
+Measured 2026-10-05 on master `bb0d229`. **This is the most dangerous item in
+this file**, because it produces *wrong data and no error*: `json2.decode[T]`
+returns a **zero-valued `T`** rather than failing, so whatever validates the
+result complains about a field it never received.
+
+**Read the trigger before you trust it — the first version of this note was
+wrong, and wrong in the useful direction.** It originally said "`json2` +
+`net.http` is the broken combination". That is **not** what is happening: the
+import alone is innocent. The trigger needs a *third* thing.
+
+Here is the whole thing, as nine standalone cells with no Vails code in the
+deeper ones. Every row was built and run on this machine's compiler.
+
+| # | binary contains | `decode` target declared in | result |
+|---|---|---|---|
+| A | `json2` | `main`, 2 fields | works |
+| B | `json2` + `net.http` | `main`, 2 fields | works |
+| I | `json2` + `os` + `net.http` | `main`, field-for-field copy of `VailsConfig` | works |
+| G | `json2` + `os` + `config` | **`config`** (`config.VailsConfig`) | works |
+| **H** | `json2` + `os` + **`net.http`** + `config` | **`config`** | **zero struct, NO error** |
+| E | `config` (via `config.load`) | `config` | works |
+| **F** | `config` + **`net.http`** (via `config.load`) | `config` | **zero struct** |
+
+So the trigger is the conjunction, and all three parts are load-bearing:
+
+1. **`net.http` is linked into the binary**, and
+2. **`json2.decode` is instantiated in a module other than the one importing
+   `net.http`**, and
+3. **the type being decoded does not matter.** `CfgLocal` in cell I has the
+   same shape as `VailsConfig` and works; `VailsConfig` itself fails. What
+   matters is *which module* it came from, not what it contains.
+
+Cells I and G are the pair that pins it down: each removes exactly one of the
+three conditions and turns the failure into a pass.
+
+Minimal reproduction — two imports, one decode, no Vails code:
+
+```v
+module main
+
+import json2
+import os
+import net.http
+import othermod          // declares `pub struct Cfg`
+
+fn main() {
+    txt := os.read_file('data.json') or { panic(err.msg()) }
+    cfg := json2.decode[othermod.Cfg](txt) or {
+        eprintln(err.msg())   // never printed
+        return
+    }
+    println(cfg.name)         // prints empty
+}
+```
+
+Ruled out by measurement, not assumption: not the two `cli_flags` (a build with
+both still fails); not module count; not struct complexity (cell I); not the
+import itself (cell B); not the JSON bytes — the same file decodes correctly in
+G and H; and no module imports the old `json`.
+
+**Consequence for this repository: the `vails` CLI cannot read `vails.json`.**
+`vails doctor`, `vails run`, `vails build` and `vails dts` all report
+`vails.json: name must not be empty` on a perfectly valid project. `dev/dev.v`
+and `dev/serve.v` are the only `net.http` importers, and `cli` imports `dev` for
+`vails run`'s dev server — that one import is the whole exposure.
+
+**Why `v test .` is 45/45 green and still cannot see this:** every `_test.v` file
+is its own binary, and **no test file imports both `dev` and `config`**
+(`dev_test.v` is `module dev` and imports only `capabilities` and `os`). The one
+import set that breaks is never linked in a test. `buildplan/json2_import_test.v`
+guards the *precondition* textually instead — it cannot assert the bug, because a
+test that reproduces it would only pass while the compiler is broken — but no
+test here can catch a regression in the decode itself. This is the §2c lesson at
+suite scale: a green check that cannot fail.
+
+Practical rules until this is fixed or filed:
+
+- Do not trust `config.load` (or any `json2.decode`) in a binary that also links
+  `net.http`. `vails doctor` reaching `vails.json : INVALID` is this bug, not a
+  bad config.
+- The check that matters when reading a decode result is whether the *decoding
+  module* also imports `net.http`. If it does not, the result is trustworthy
+  even when some other module in the binary does.
+- Anything that must read `vails.json` outside a test belongs in a module that
+  does not import `dev`.
+- The checked-in `examples/*/frontend/vails.d.ts` files cannot be regenerated
+  with `vails dts` for this reason; they were last generated before the move to
+  master and say so in their header ("do not edit").
+
 Two consequences, and the first one inverted a decision:
 
 1. **The Windows CI job cannot be pinned to a release.** Pinning was the right
@@ -318,6 +409,36 @@ found something.
   channel, green). The only broken cell is the `mut` reference. The failure
   mode is not consistent — the same construct crashed in one program and hung
   in another — so a hang and a crash here are the same bug.
+
+- **Passing a nil VARIABLE to a `mut &T` parameter is an access violation, and a
+  nil check in the callee cannot prevent it.** Found during the 2026-10-05
+  cleanup, and it is the nastiest of this family because the guard people reach
+  for *compiles, reads as a guarantee, and never runs*:
+
+  ```v
+  fn detach(mut host &HostCtx) {
+      if host == unsafe { nil } { return }   // looks safe
+      ...
+  }
+
+  mut hook := unsafe { nil }
+  detach(mut hook)          // 0xC0000005, and the `if` above never ran
+  ```
+
+  Measured in a standalone file with no Vails code, one cell at a time:
+  `takes_mut_ref(mut unsafe { nil })` passing the **literal** is **safe** — the
+  nil reaches the body and the check fires. `mut hook := unsafe { nil }`
+  followed by `takes_mut_ref(mut hook)` is a **hard crash**
+  (`exit -1073741819`). A plain `&T` parameter takes the same nil variable
+  without complaint, so the `mut` is the whole difference.
+
+  **The rule: never rely on a callee's nil check for a `mut` reference argument
+  — nil-check at the call site.** And do not "fix" this by adding the check to
+  the callee: `webview/host.v`'s `detach` carries a comment recording that a
+  check was added there, the suite crashed anyway, and it was removed. The three
+  `webview.detach` call sites in `services/` (`tray`, `menu`, `drop`) each keep
+  their own guard for this reason; `tray` and `menu` clear the field *before*
+  detaching, so a second detach is unreachable.
 
   **Workaround — plain reference plus `unsafe` writes**, which is what
   `webview_windows.c.v`'s `WindowJob` does (`#[heap]`, `unsafe { j.error = … }`):

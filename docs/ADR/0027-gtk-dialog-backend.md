@@ -165,9 +165,13 @@ result shape, the ids and the parse are shared; only the widget differs.
   mapping to `ok`, unknown ids not guessed, only `ok`/`yes` counting as accepted,
   `button` always one of five names, and only `ACCEPT` meaning the chooser took
   files. Runs on Windows too, where there is no GTK.
-- **Linux, proven end to end:** `tests/e2e_linux/dialog.png` — a real
-  `GtkMessageDialog` answered by a timer, reporting the button the probe
-  pressed.
+- **Linux, proven end to end:** the probe run recorded in
+  `tests/e2e_linux/README.md` — a real `GtkMessageDialog` answered by a timer,
+  reporting the button the probe pressed. **Erratum (2026-10-05):** this bullet
+  cited `tests/e2e_linux/dialog.png` as its evidence, and that file has never
+  existed in this repository — `git log --all -- tests/e2e_linux/dialog.png`
+  returns no commits. The run itself is not in doubt; the *artifact* was. The
+  claim rests on the probe's stdout, and the linked section now says so.
 - **Linux, deliberately not unit-tested:** the native path, per decision 4. The
   test that would have done it is replaced by one that asserts the gate rejects
   bad input *before* the widget is built.

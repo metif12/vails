@@ -18,6 +18,54 @@ Conventions for this file:
 
 ## [Unreleased]
 
+### Changed
+
+- **Documentation accuracy pass, 2026-10-05.** No behaviour changed; three
+  documents no longer cite screenshots that have never existed in this repository.
+  `git log --all` returns **zero commits** for `tests/e2e_windows/tray.png`,
+  `tests/e2e_windows/menu.png` and `tests/e2e_linux/dialog.png`, yet ADR-0017
+  cited the first two as its evidence, ADR-0027 cited the third as "Linux, proven
+  end to end", and `README.md` cited the first as the tray's "E2E proof". The runs
+  themselves are not in doubt — the tray loop is still machine-checked by the E2E
+  script's `PostMessage` -> subclass -> `tray:clicked` assertion — but the
+  citations were evidence-shaped without evidence, which is the one failure mode
+  this project cannot afford in a document other people rely on. The dated ADRs
+  got **errata appended rather than rewritten**, so the record of what was believed
+  on the day stays intact; the living docs (`README.md`, `ROADMAP.md`) were
+  corrected directly. One broken markdown image link removed, and the Linux
+  `v test` status in ADR-0017 updated from "Pending" (with a named compiler
+  blocker) to 44/44 green.
+
+  Two further claims were stale in the same pass, and both were wrong in the
+  direction of under-reporting what the project achieves:
+
+  - **`v test webview` on Windows.** `ROADMAP.md` said it "cannot be run: it
+    takes the host down", measured 4× on 2026-09-30 and again on 2026-10-03. On
+    2026-10-05 all six files compile **and** run, twice, inside a full
+    `v -cc gcc test .`. What changed is not known — no test needed editing and
+    the compiler is the same. The row now records the history and labels this
+    *currently green*, not *fixed*, because a claim with no known cause should
+    not be stated without its history.
+  - **The Windows test command "carries one extra flag, and it is not
+    optional"** — over a code block that contained no extra flag. No link flag
+    has been needed since the move to the V master build this project requires;
+    `README.md` now says so and keeps the reason, so the flag is recognisable as
+    version-scoped rather than mysterious.
+- **`menu.set_menu` now fails instead of pretending it worked.** If the window's
+  message hook cannot be installed, `set_menu` returns that error rather than
+  swallowing it, and the `HMENU` it just built is destroyed rather than leaked.
+  The hook is now installed *before* `SetMenu`, so there is no window in which a
+  click can arrive for a menu the window is not yet routing. Previously a failed
+  hook left the handler counting clicks against a bar that would never be
+  drawn. Two tests pin it: one at the native seam, one at `set_menu`.
+- **`vails dts` now marks the blocking commands in the generated `.d.ts`.** The
+  four commands that open a native dialog — `dialog.message`, `dialog.open`,
+  `dialog.save`, `menu.popup` — get a JSDoc note, so an editor can tell a call
+  that will not resolve until a human answers from one that resolves
+  immediately. The set is pinned by a test, so a fifth blocking command shipped
+  without a marker fails the suite. (The checked-in example declarations are one
+  release behind — see "Not done" below.)
+
 ### Added
 
 - **`balloon` service** (ADR-0039): `balloon.show` shows a tray balloon
@@ -63,6 +111,43 @@ Conventions for this file:
 
 ### Fixed
 
+- **`v test .` on Linux is green: 44 of 44 test files, from 20 of 44 failing.**
+  Measured 2026-10-05 in the CI container (`Dockerfile`, V `0.5.2 e5ab344`,
+  WebKitGTK 2.52.6) — the first time this had ever been run on this project.
+  Twenty files failed for **three** root causes, none of them flaky:
+  - **`services` did not compile at all on Linux**, so all 13 `services` test
+    files failed at once. `drop.v`'s `on_drop_message` called
+    `read_dropped_paths_native`, which is Windows-only: a platform-neutral module
+    may not name a platform function, so the *whole module* failed, not one
+    function. `on_drop_message` moved to `drop_windows.c.v` beside its only caller
+    and its only platform dependency — the same arrangement
+    `menu_windows.c.v`'s `on_bar_command` already used. Every testable piece
+    (`decide_drop`, `validate_dropped_paths`, `drop_files_data`) stayed in
+    `drop.v` and stays covered on both platforms.
+  - **`webview/webview_linux.c.v` had 7 compile errors**: `vails_window_opened`
+    and `vails_window_closed` were never declared on the V side (they are
+    `static inline` in the shim, and an `#insert`-ed header supplies definitions
+    but not V signatures); `label_js(...)` was passed where `vails_add_runtime`
+    wants a `&char`; and four `mut` errors on `win`. All seven are the F0
+    multi-window work that had only ever been compiled on Windows.
+  - **`webview/jobs_test.v` asserted a Windows-only error string.** The refusal is
+    real on both platforms and the load-bearing half of the property — refused
+    *before* queueing, so the queue is not holding a job nothing will run — is
+    asserted everywhere. Only the wording is platform-specific, so each platform
+    now asserts its own message rather than one of them passing vacuously.
+  - Consequence worth stating plainly: **the six `webview` test files now run on
+    Linux**, which is coverage Windows cannot give at all (on Windows they take
+    the host down — see ROADMAP). Windows is unchanged at 44/44.
+- **`app_flags` is a pure function of its `target` argument again.** Its `-cc gcc`
+  branch was wrapped in `$if windows`, so `app_flags(.windows)` returned `[]` when
+  called on Linux: a Windows build plan could only be checked on a Windows
+  machine, which is precisely the half-checking that taking `Target` as an
+  argument exists to prevent. Found by the Linux run, in the test written to catch
+  exactly this. The `$if` was never load-bearing — the only production caller
+  passes the host's own target — and `cli_flags` has always added its Windows
+  flags without one, which is what made the outlier visible. No real build
+  changes; `buildplan_test.v`'s exact-equality assertion now runs and bites on
+  both platforms.
 - **`emit_to` across windows no longer crashes the process or lie about
   succeeding** (F0, found by running `examples/multiwindow` on 2026-10-04 — two
   defects that had shipped since 2026-09-30 behind a green `v vet`):
@@ -506,6 +591,47 @@ Conventions for this file:
 
 ### Not done in this release
 
+- **The `vails` CLI cannot read `vails.json`.** This is a V master bug, not a
+  Vails one: on `vlang/v` master, `json2.decode[T]` returns a **zero-valued
+  struct with no error** when the binary also links `net.http` **and the decode
+  is instantiated in a module other than the one importing `net.http`**.
+  `cli` imports `dev` (which imports `net.http`), so `vails doctor`, `vails run`,
+  `vails build` and `vails dts` all report `vails.json: name must not be empty`
+  on a project whose config is valid.
+
+  Seven-cell bisection, each cell built and run separately; the full table is in
+  `AGENTS.md` §1b. **Note the middle of that table, because the obvious reading
+  is wrong:** adding `net.http` to a program that decodes a 2-field struct
+  **works**, and so does decoding a field-for-field copy of `VailsConfig` that
+  is declared in `main`. Only the *combination* with a cross-module decode fails.
+  A first pass at this concluded "`net.http` is the trigger" and wrote that down;
+  it was refuted by cell B.
+
+  Two consequences worth stating plainly:
+
+  - **`v test .` was 44/44 green and cannot catch this.** Each `_test.v` is its
+    own binary, and no test file imports both `dev` and `config`, so the one
+    import set that breaks is never linked in a test.
+  - **The checked-in `examples/*/frontend/vails.d.ts` files cannot be
+    regenerated**, so they are one release behind the generator: the
+    blocking-command JSDoc described under **Changed** is in `services/dts.v`
+    but **not yet in those three files**. They must not be hand-edited, which is
+    why this is listed rather than patched.
+
+  **`buildplan/json2_import_test.v` now guards the shape of the exposure**, and
+  it is the guard this entry needed all along. It cannot assert the bug itself
+  (that would mean a test which passes only by reproducing a compiler bug, and
+  which the V fix turns red), so it asserts the *precondition* instead:
+  `net.http` still has exactly one importer, that importer and every
+  `json2.decode` instantiator stay **disjoint**, and `cli` is still the one place
+  the two meet. A second `net.http` importer, or a `net.http` import landing in a
+  decoding module, now goes red at review time instead of shipping a command
+  that reports a valid config as invalid.
+
+  Fixing it means either an upstream V report (the right fix; `json2` was three
+  days old on 2026-10-03, and #28936 / #29156 are the same cross-module-symbol
+  family in `json2`) or keeping `net.http` out of the binary that reads config,
+  which means `vails run` spawning a helper process. Not done.
 - **`menu.set_menu` is unproven at runtime on Windows.** It compiles and links,
   and the pure-V classifier behind it (`bar_click`) is unit-tested on every
   platform, but the E2E window would not come up in the capture session, so

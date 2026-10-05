@@ -455,13 +455,20 @@ cd /mnt/d/MyProjects/vails
 VAILS_SERVICES_PROBE=dialog sh tests/e2e_linux/run_services.sh
 ```
 
-![real GtkMessageDialog, answered by the probe, button reported](dialog.png)
+> **There is no committed screenshot for this run, and the image link that used
+> to sit here pointed at nothing.** `tests/e2e_linux/dialog.png` has never existed
+> in this repository — `git log --all -- tests/e2e_linux/dialog.png` returns no
+> commits at all — yet this section and ADR-0027 both cited it as the proof. So
+> the claim below rests on the probe's stdout, not on an image, and it is now
+> worded as what it is. Re-capturing it is a small job on any machine with the
+> GTK stack; until someone does, there is nothing in the repo to check by looking.
 
-- **Fully proven, and provable without a human.** The screenshot shows a real
-  `GtkMessageDialog` that the probe answered from a timer, reporting
-  `button: ok, canceled: false`. So the whole chain is machine-checked:
-  `dialog.message` -> `gtk_message_dialog_new` -> `gtk_dialog_run`'s nested
-  main loop -> `GTK_RESPONSE_OK` -> the shared response mapping -> the page.
+- **Fully proven, and provable without a human — by the probe's report, not by a
+  committed screenshot.** The run reported a real `GtkMessageDialog` answered by
+  a timer from a `g_timeout_add`, reporting `button: ok, canceled: false`. So
+  the whole chain is machine-checked: `dialog.message` -> `gtk_message_dialog_new`
+  -> `gtk_dialog_run`'s nested main loop -> `GTK_RESPONSE_OK` -> the shared
+  response mapping -> the page.
 
   The "last S1 item waiting on a human answering a modal window" was not one.
   A `g_timeout_add` callback scheduled *before* the page's call runs inside the
