@@ -359,6 +359,48 @@ is a rule about *how* they are stored, not about avoiding them.
   `Get-Content` is the same trap when *reading*: add `-Encoding utf8` or the
   console will show a correct file as mojibake, which sends you looking for
   damage that is not there.
+- **`-Encoding utf8` is NOT enough for a `.v` file — it CREATES this bug.**
+  PowerShell 5.1's `utf8` means "UTF-8 **with** BOM". So the very incantation
+  above, used on a `.v` file, writes `EF BB BF` as its first three bytes. That
+  is measured, not theoretical: it is how four V test files in this session
+  ended up with a BOM, and `buildplan/bom_test.v` now exists because of it.
+
+  What V does with the BOM is the part worth knowing, because **the error names
+  something that is not wrong**. Measured on master `bb0d229`, on an ordinary
+  three-line `hello.v`:
+
+  ```
+  hello.v:1:1: notice: script mode started here
+  hello.v:3:4: error: all definitions must occur before code in script mode
+  hello.v:1:1: error: invalid character `﻿`
+  ```
+
+  The file is **not** a script and `fn main()` is **not** a definition-after-
+  code. The only true message is the last one. On a larger file the cascade is
+  worse — I measured three `script mode started here` notices, three
+  `all definitions must occur before code` errors, and a fourth
+  `unexpected token '}'` that is pure collateral damage from a parser that had
+  already lost sync. **So: if V reports a script-mode error in a file that has
+  a `module` line, check for a BOM before anything else.**
+
+  The BOM-free write on PowerShell 5.1:
+
+  ```powershell
+  # WRONG for a .v file - adds a BOM
+  Set-Content -Path x.v -Value $s -Encoding utf8
+
+  # RIGHT on 5.1: UTF8Encoding($false) means "no BOM"
+  [System.IO.File]::WriteAllText($path, $s, (New-Object System.Text.UTF8Encoding($false)))
+  ```
+
+  Or use the file tools (§ "Definition of done"), which write UTF-8 without a
+  BOM. PowerShell 6+ has `-Encoding utf8NoBOM` if you ever get there.
+
+  Reported upstream as [vlang/v#29485](https://github.com/vlang/v/issues/29485).
+  GCC, Go, Rust, Zig and Python all accept a leading BOM; V rejects it, and
+  buries the message. The fix there is one function (`read_source_file_raw`,
+  `vlib/v/parser/parser.v`), so until it lands, the guard below is what keeps
+  this repository honest.
 - **Prefer the file tools over shell redirection** for editing existing files
   (§ "Definition of done"). They preserve encoding; `Add-Content` on a UTF-8
   file is how `services/dialog_test.v` grew its test cases, and it works,
