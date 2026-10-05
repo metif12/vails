@@ -38,14 +38,43 @@ second was the one the guard was written for:
 
 The first real run then failed at both jobs' first substantive step, which is the
 useful outcome: `linux` on `E: Unable to locate package libwebkit2gtk-4.1-dev`,
-`windows` on `No package found matching input criteria` from `winget`. Both fixed
-from their measured causes — the Dockerfile's base is now a pinned
+`windows` on `No package found matching input criteria` from `winget`. Both are
+fixed from their measured causes — the Dockerfile's base is now a pinned
 `ubuntu:24.04` (the old `thevlang/vlang:ubuntu-build` tag descends from Debian
 10 **Buster**, EOL, whose archive has no 4.1; and the image overwrote
 `/opt/vlang` by building V from source anyway, so the base only ever supplied a
-distro), and Windows installs the **pinned 0.5.2 release zip** instead of a
-winget package that does not exist. The Dockerfile change was verified by
-building the image and running the suite in it, not by pushing it.
+distro), and Windows installs a **pinned release zip** instead of a winget
+package that does not exist. Both fixes are confirmed on the real runner:
+`Build the image` ✓ and `Install V` ✓.
+
+### And then the Windows job found something bigger than its own bug
+
+The `json2` smoke step — added in `f897f0f`, which this file records as the
+commit that stopped `doctor` claiming a notification works — fired on a clean
+runner and said:
+
+    V 0.5.2 7647ce1
+    no vlib\json2 under D:\a\_temp\vlang\v
+
+**No released V can build this repository.** `json2` was added to `vlang/v` on
+**2026-10-03** (commit `152ba0d2`, "keep the decoder's value index in a flat
+array") and it exists **only on `master`**. Checked and confirmed: not in tag
+`0.5.2`, and not in `weekly.2026.08`, `.07`, `.06` or `.05` — every tag predates
+it. It lives at `vlib/json2`, not `vlib/v/json2`, which is why a `vlib/v`
+listing looks like it is missing.
+
+So the Windows job **cannot** be pinned to a release, which is the opposite of
+what pinning was supposed to buy, and it means the `-ldflags "-lws2_32"` comment
+in `ci.yml` is describing a version that cannot get as far as needing it. The
+only correct pin is a **vlang/v commit**, which means building V from source on
+the runner — the same thing the Linux container already does successfully. That
+is a real restructure of the windows job (MSYS2 has to be installed *before* V,
+because V's own Windows build needs a C compiler), and it is not done.
+
+What is true right now, precisely: **CI runs jobs; the Windows job installs a
+compiler that provably cannot build this repo, and says so in one named line
+instead of failing obscurely two steps later.** That is the smoke step working
+as designed, on a machine nobody had ever run it on.
 
 **Which means the Linux backlog is now visible, and it is large.** 20 failing
 files is not a list of flaky tests: `webview/webview_linux.c.v` has seven

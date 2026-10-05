@@ -74,7 +74,8 @@ Consequences, all measured on this machine:
   `v -cc gcc -o vails.exe ./cli` both succeed with no `-ldflags` and no
   `-cflags`, across 33 test files. They are still *documented* in §1 because they
   are version-scoped, and `buildplan.cli_flags` still emits them.
-- **`json2` exists in this vlib**, so the build works.
+- **`json2` exists in this vlib**, so the build works — but read the next line
+  before you trust that on any other machine.
 - **VSH works**: `v run script.vsh` compiles and runs a `.vsh` file. Three
   script-mode rules cost real time and are written up where they bit —
   `tests/e2e_windows/capture.vsh` carries them in its header. The short version:
@@ -86,6 +87,37 @@ Consequences, all measured on this machine:
   copied out of a clone rather than installed with `v skills add --global`,
   which does the same thing: see below.
 
+#### `json2` exists only on `vlang/v` master, and in NO release
+
+The `json2` bullet above is true of **this machine's install and of nothing
+else**. Measured 2026-10-05 against the GitHub API, because the Windows CI
+runner refused to build and the smoke step named the reason:
+
+- `json2` was added to `vlang/v` on **2026-10-03**, commit `152ba0d2`.
+- It is **not** in tag `0.5.2`, nor in `weekly.2026.08` / `.07` / `.06` / `.05`.
+  Every published tag predates it.
+- It lives at **`vlib/json2`**, not `vlib/v/json2`. Upstream ships
+  `vlib/v/astjson` and no `json2` under `vlib/v`, so a `vlib/v` listing makes it
+  look absent — it is at the vlib root.
+
+So **no released V can build this repository.** `bridge/` and `state/` import
+`json2`, and a released compiler fails with
+`builder error: cannot import module "json2" (not found)`.
+
+Two consequences, and the first one inverted a decision:
+
+1. **The Windows CI job cannot be pinned to a release.** Pinning was the right
+   instinct — every other flag there is justified against a specific V — but the
+   only pin that works is a `vlang/v` *commit*, which means building V from source
+   on the runner. MSYS2 then has to be installed **before** V, because V's own
+   Windows build needs a C compiler. Not done.
+2. **"Install a newer V" is not a complete instruction.** Newer *released* V does
+   not help. What helps is a V built from master.
+
+The trap this sits in: a machine with a master checkout builds fine, so the
+dependency looks satisfied locally, and the failure only appears on a fresh
+machine — which is what CI is for.
+
 #### Two history worth keeping, because both cost an afternoon
 
 **There were two V installs, and one could not build this repo.** Until
@@ -93,7 +125,9 @@ Consequences, all measured on this machine:
 first on PATH, and its vlib had **no `json2`** — so `bridge/` and `state/`, which
 import it, failed with `builder error: cannot import module "json2" (not found)`.
 That reads like a Vails dependency problem and is not one. That install is now
-gone; the trap worth remembering is the shape of it, not the path.
+gone; the trap worth remembering is the shape of it, not the path. **That commit
+is also the one CI installs**, so on 2026-10-05 the same failure appeared on a
+clean GitHub runner from the other direction — see the section above.
 
 **`v up` is not a way to fix a Vails build.** It replaces the install's `vlib`
 with V master's and then cannot compile master's own `vup` tool with the 0.5.2
