@@ -1,179 +1,187 @@
 # Docs Site Plan — Vails intro + documentation (Phase 7)
 
-> وضعیت: **برنامه‌ریزی‌شده، ساخته نشده**. این فایل برنامه و اطلاعات لازم را
-> ذخیره می‌کند؛ هیچ خطی از سایت هنوز نوشته نشده و `docs/site/` فقط همین
-> فایل را دارد.
-> تصمیم‌های قفل‌شده: محتوای سایت **انگلیسی LTR**، خروجی **استاتیک اکسپورت
-> (GitHub Pages)**، اسکوپ نسخه اول **داک کامل** (نه MVP خلاصه)، انتشار
-> **خودکار از CI** (بخش ۷).
+> Status: **planned, not built**. This file holds the plan and whatever
+> information the build will need; not a line of the site exists yet, and
+> `docs/site/` contains only this file.
+> Locked decisions: site content is **English LTR**, output is a **static export
+> (GitHub Pages)**, v1 scope is the **full docs** (not a cut-down MVP), and
+> publishing is **automatic from CI** (§7).
 
-> **تاریخچهٔ این فایل (۲۰۲۶-۱۰-۰۴).** نسخهٔ قبلی سه ایراد داشت که این
-> ویرایش آن‌ها را درست می‌کند: می‌گفت ساخت «بعد از اتمام همهٔ فازها و ترک‌ها»
-> شروع می‌شود، که شرطی است که هرگز برآورده نمی‌شود (بخش ۱)؛ بازهٔ ADR را
-> `۰۰۰۱–۰۰۱۱` نوشته بود در حالی که ۳۷ فایل تا `۰۰۳۹` وجود دارد (بخش ۴)؛ و
-> می‌گفت `dist/` به Pages می‌رود بدون آنکه بگوید **چه چیزی** آن را می‌برد
-> (بخش ۷، تازه اضافه شد).
+> **History of this file (2026-10-04).** It was Persian until this revision,
+> which was the only non-English document in the repository — everything else
+> (README, ROADMAP, CHANGELOG, AGENTS.md, every ADR) is English, and a docs
+> site about an English-language framework should not be the one document that
+> is not. Translating it also fixed three defects the previous version had: it
+> said the build starts "after all phases/tracks are done", a condition that can
+> never be met (§1); its ADR range read `0001–0011` when 37 files exist up to
+> `0039` (§4); and it said `dist/` goes to GitHub Pages without saying **what
+> carries it there** (§7, newly added).
 
-## 1. پیش‌شرط شروع (entry criteria)
+## 1. Entry criteria
 
-قبل از شروع ساخت، این‌ها باید تمام شده باشند (رجوع به `ROADMAP.md`):
+Before the build starts (see `ROADMAP.md`):
 
-- Phase 3 (assets/dev) تا Phase 7 (hardening) + ترک‌های T3/T4/T5، M0–M4، C0–C4.
-- کاتالوگ سرویس‌ها (S1/S2/S3) نهایی شده باشد، چون هر سرویس یک صفحه داک می‌خواهد.
-- `generator` و `vails.json` پایدار شده باشند (مرجع CLI/API از روی `--help`
-  واقعی و سورس تولید می‌شود، نه حدس).
+- Phase 3 (assets/dev) through Phase 7 (hardening), plus tracks T3/T4/T5,
+  M0–M4, C0–C4.
+- The service catalogue (S1/S2/S3) is final, because every service needs a docs
+  page.
+- `generator` and `vails.json` have settled, so the CLI/API reference is
+  generated from real `--help` and real source rather than from guesswork.
 
-### شرطی که تازه اضافه شده: CI باید یک بار سبز شده باشد
+### A precondition this file did not have before
 
-بخش ۷ تازه اضافه شد و یک پیش‌نیاز دارد که این فایل قبلاً نداشت: **Publish
-کردن با یک `ci.yml` که تاکنون هیچ job سبزی ندارد، یعنی استقرار روی یک دروازهٔ
-تست‌نشده.** تا وقتی `ci.yml` یک اجرای واقعیِ سبز گزارش نکرده، افزودن `docs.yml`
-یعنی دو سیستم که هیچ‌کدام اثبات نشده‌اند، که بدتر از یکی اثبات‌نشده است.
+§7 is new and it carries a prerequisite the file lacked: **publishing behind a
+`ci.yml` that has never reported a green job is publishing behind an untested
+gate.** Until `ci.yml` records one real green run, adding `docs.yml` means two
+systems that are both unproven, which is worse than one.
 
-ترتیب صریح، چون AGENTS.md §3 می‌گوید یک فاز در هر بار:
+The order is explicit, because AGENTS.md §3 says one phase at a time:
 
-1. `ci.yml` یک اجرای سبز روی runner واقعی داشته باشد.
-2. بعد `docs.yml`.
-3. بعد `veb` spike.
+1. `ci.yml` has one green run on a real runner.
+2. Then `docs.yml`.
+3. Then the `veb` spike.
 
-اگر این ترتیب رعایت نشود، «سایت منتشر شد» ادعایی است که یک بن‌بست
-زیرساختی را پنهان می‌کند.
+Skipping that order makes "the site is published" a claim that hides an
+infrastructure dead end.
 
-### و یک شرط که برداشته شد
+### And one precondition that was removed
 
-نسخهٔ قبلی این فایل می‌گفت «ساخت سایت بعد از اتمام **همهٔ** فازها و ترک‌ها
-شروع می‌شود». آن شرط هرگز برآورده نمی‌شود: `ROADMAP.md` خودش می‌گوید ≈۵۲ روز
-کار باقی مانده و دو ترک روی «تصمیم‌های بستهٔ خودشان» گیر کرده‌اند (X0 Vinix
-منتظر یک «بله» است، U1–U4 منتظر یک کانال توزیع). **پارک تا ابد، خودش یک
-انتظار است که پایان ندارد.** شرط درست، «پایداری» است نه «پایان»:
+The previous version said the build starts "after **all** phases and tracks are
+done". That can never be satisfied: `ROADMAP.md` itself says ≈52 focused days
+remain, and two tracks are parked on decisions that are not ours to make (X0
+waits on a Vinix "yes", U1–U4 wait on a distribution channel). **Parking until
+everything is finished is an expectation with no end.** The right condition is
+*stability*, not completion:
 
-> شروع ساخت وقتی مجاز است که `CONTEXT.md`، `cli/vails.v`، `vails.json` و
-> مانند آن‌ها **دیگر در حال جابه‌جایی نباشند** — چون هر تغییر بعد از نوشتن
-> داک یعنی داک کهنه. ساخت تدریجی و در طول کار مجاز است؛ **منتظر ماندن تا
-> «همه‌چیز تمام شد» مجاز نیست.**
+> Building may start once `CONTEXT.md`, `cli/vails.v`, `vails.json` and their
+> neighbours have **stopped moving** — because every change after a docs page is
+> written means that page is stale. Building incrementally, alongside the tracks,
+> is allowed; **waiting for "everything is finished" is not.**
 
-این یعنی صفحه‌هایی که از روی سورسِ پایدار تولید می‌شوند (`--help`, `v doc`,
-`.d.ts`) زودتر می‌آیند و صفحه‌های دستی دیرتر — که همان ترتیبی است که بخش ۸
-توصیه می‌کند.
+In practice that means pages generated from stable source (`--help`, `v doc`,
+`.d.ts`) arrive first and hand-written pages later — which is the same order §8
+recommends.
 
-## 2. ساختار سایت (IA نهایی)
+## 2. Site structure (final IA)
 
 ```text
-Home (hero + جدول مقایسه Wails/Tauri/Vails + کد ۱۰خطی hello + CTA)
-/docs/getting-started  نصب (V 0.5.x، MSYS2 ucrt64، webkitgtk) + vails doctor
+Home                    hero + Wails/Tauri/Vails comparison table + 10-line hello + CTA
+/docs/getting-started   install (V 0.5.x, MSYS2 ucrt64, webkitgtk) + vails doctor
 /docs/quickstart        init → run → ping→pong
 /docs/concepts          app, window, bridge, IPC command-vs-event, events,
-                       capabilities, config (از روی CONTEXT.md)
-/docs/guides           assets dev/prod، generator d.ts، channels (T3)،
-                       state (T4)، CSP (T7)، mobile (M0–M4)، CEF opt-in
-/docs/cli              version/doctor/init/run/build [--target] + exit codes
-/docs/services         یک صفحه به‌ازای هر سرویس S1/S2 + manifestهای T5
-/docs/security         capability matrix + asset scope + threading rule
-/docs/api              مرجع خشک هر ماژول (signature + مثال)
-/docs/examples         E0–E6 + hello
-/docs/troubleshooting  GC ـgc none، Wayland، WebView2، frontend not found + FAQ
-/docs/adr              ایندکس ADR-0001 تا 0011 + خلاصه هر تصمیم
-/docs/roadmap          + changelog
-/llms.txt              نسخه AI-friendly (معادل markdown negotiation در veb)
+                        capabilities, config (from CONTEXT.md)
+/docs/guides            assets dev/prod, generator d.ts, channels (T3),
+                        state (T4), CSP (T7), mobile (M0–M4), CEF opt-in
+/docs/cli               version/doctor/init/run/build [--target] + exit codes
+/docs/services          one page per S1/S2 service + the T5 manifests
+/docs/security          capability matrix + asset scope + threading rule
+/docs/api               dry reference per module (signature + example)
+/docs/examples          E0–E6 + hello
+/docs/troubleshooting   GC `-gc none`, Wayland, WebView2, frontend not found + FAQ
+/docs/adr               ADR-0001…0039 index + a summary per decision
+/docs/roadmap           + changelog
+/llms.txt               AI-friendly version (veb's markdown negotiation)
 ```
 
-استاندارد بصری (از Examples track در ROADMAP): system type scale،
-spacing rhythm، `focus-visible`، `light+dark via prefers-color-scheme`،
-vanilla بدون فریمورک UI، انگلیسی LTR.
+Visual standard (from the Examples track in ROADMAP): system type scale,
+spacing rhythm, `focus-visible`, light+dark via `prefers-color-scheme`, vanilla
+with no UI framework, English LTR.
 
-## 3. نکات فنی veb (تحقیق‌شده روی V 0.5.x، از modules.vlang.io/veb.html)
+## 3. veb notes (researched against V 0.5.x, from modules.vlang.io/veb.html)
 
-- اسکلت: `App { veb.StaticHandler }` + `Context { veb.Context }` +
+- Skeleton: `App { veb.StaticHandler }` + `Context { veb.Context }` +
   `veb.run[App, Context](mut app, 8080)`.
-- استاتیک: `app.handle_static('static', true)!` برای mount در روت؛
-  `index.html` خودکار سرو می‌شود. مثال رسمی: `examples/veb/static_website`.
-- دو حالت: dev با `v -d veb_livereload watch run .` (فقط صفحات دارای
-  `</html>`)، prod با `v -prod` → سینگل‌باینری شامل تمپلیت‌های
-  کامپایل‌شده (خطای تمپلیت در build، نه runtime).
-- امکانات آماده: `enable_static_compression` (zstd/gzip، pre-compress با
-  `zstd -k`)، `enable_markdown_negotiation` (سرو `path.md` با
-  `Accept: text/markdown` — پایه `llms.txt`)، `not_found()` کاستوم برای
-  ۴۰۴، middleware (`app.use` / `route_use`)، controllers برای گروه‌بندی.
-- نقش veb در این پروژه فقط **SSG + سرور پیش‌نمایش** است: یک دستور export
-  همه routeها را crawl و `dist/*.html` می‌نویسد؛ `dist/` به GitHub Pages
-  می‌رود (gitignore یا branch جدا).
+- Static: `app.handle_static('static', true)!` to mount at the root;
+  `index.html` is served automatically. Official example:
+  `examples/veb/static_website`.
+- Two modes: dev with `v -d veb_livereload watch run .` (only for pages
+  containing `</html>`), prod with `v -prod` → a single binary with the templates
+  compiled in (so a template error is a **build** error, not a runtime one).
+- Available already: `enable_static_compression` (zstd/gzip, pre-compress with
+  `zstd -k`), `enable_markdown_negotiation` (serves `path.md` to
+  `Accept: text/markdown` — the basis for `llms.txt`), a custom `not_found()`
+  for 404, middleware (`app.use` / `route_use`), and controllers for grouping.
+- veb's only role in this project is **SSG + preview server**: one export command
+  crawls every route and writes `dist/*.html`; `dist/` goes to GitHub Pages
+  (gitignored, or a separate branch).
 
-## 4. موجودی محتوا (از کجا برداشته می‌شود — موقع ساخت دوباره راستی‌آزمایی شود)
+## 4. Content inventory (where the content comes from — re-verify at build time)
 
-- `README.md`: جدول مقایسه، prerequisites، install، troubleshooting.
-- `CONTEXT.md`: همه مفاهیم دامنه (App/Window/Bridge/IPC/Capability/Config).
-- `docs/ADR/`: خلاصه هر تصمیم برای `/docs/adr`. **بازهٔ درست ۰۰۰۱–۰۰۳۹ است**
-  (۳۷ فایل، شمارش‌شده ۲۰۲۶-۱۰-۰۴) — نسخهٔ قبلی این فایل «۰۰۰۱–۰۰۱۱» می‌نوشت
-  که ۲۸ تصمیمِ ثبت‌شده را نادیده می‌گرفت. `/docs/adr` باید **خودش فهرست را
-  بسازد** (اسکن دایرکتوری)، نه اینکه بازه‌ای دستی در کد بنویسد؛ وگرنه همین
-  کهنگی دوباره اتفاق می‌افتد.
-- `CHANGELOG.md`: به‌ازای هر نسخه، برای صفحهٔ releases.
-- `ROADMAP.md`: جدول اولویت + چک‌باکس‌ها، برای `/docs/roadmap`.
-- `application/`: `AppOptions`، `new`، `register_service`، `has_service`.
-- `bridge/`: `Request/Response/Notify`، `register`، `register_validated`،
-  `call_from`/`call_json`، `notify`، `handle_envelope_from`،
-  `runtime_js`/`runtime_js_bound`، `resolve_js`، پیشوندهای `err_*`.
-- `events/`: `on`/`emit`، `to_js`.
-- `assets/`: `Server.read`، `content_type`، embed vs dev.
-- `generator/`: `MethodSpec`، `generate_dts`.
-- `capabilities/`: `grant`، `is_allowed`، ماتریس allow/deny.
-- `config/`: `load`/`validate`/`to_registry`/`default_config`، فیلدهای
-  `vails.json`.
-- `cli/vails.v`: رفتار واقعی `version/doctor/init/run/build`.
-- `examples/hello/`: `main.v` + `vails.json` + `frontend/index.html`
-  (الگوی کد داخل داک).
-- `tests/e2e_windows/README.md` و `tests/e2e_linux/README.md`: شواهد و نکات.
+- `README.md`: comparison table, prerequisites, install, troubleshooting.
+- `CONTEXT.md`: every domain concept (App/Window/Bridge/IPC/Capability/Config).
+- `docs/ADR/`: a summary per decision for `/docs/adr`. **The correct range is
+  0001–0039** (37 files, counted 2026-10-04) — the previous version of this file
+  wrote `0001–0011`, which would have ignored 28 recorded decisions. `/docs/adr`
+  should **build the index itself** by scanning the directory rather than
+  carrying a hand-written range in code, or the same staleness happens again.
+- `CHANGELOG.md`: per release, for a releases page.
+- `ROADMAP.md`: the priority table and checkboxes, for `/docs/roadmap`.
+- `application/`: `AppOptions`, `new`, `register_service`, `has_service`.
+- `bridge/`: `Request/Response/Notify`, `register`, `register_validated`,
+  `call_from`/`call_json`, `notify`, `handle_envelope_from`,
+  `runtime_js`/`runtime_js_bound`, `resolve_js`, the `err_*` prefixes.
+- `events/`: `on`/`emit`, `to_js`.
+- `assets/`: `Server.read`, `content_type`, embed vs dev.
+- `generator/`: `MethodSpec`, `generate_dts`.
+- `capabilities/`: `grant`, `is_allowed`, the allow/deny matrix.
+- `config/`: `load`/`validate`/`to_registry`/`default_config`, the `vails.json`
+  fields.
+- `cli/vails.v`: the real behaviour of `version/doctor/init/run/build`.
+- `examples/hello/`: `main.v` + `vails.json` + `frontend/index.html` (the code
+  pattern that appears inside the docs).
+- `tests/e2e_windows/README.md` and `tests/e2e_linux/README.md`: the evidence and
+  the gotchas.
 
-## 5. جانمایی فایل‌ها (موقع ساخت)
+## 5. File layout (at build time)
 
 ```text
 docs/site/
-  PLAN.md            # همین فایل (برنامه؛ موقع ساخت آپدیت شود)
-  content/**/*.md    # هر صفحه یک md + frontmatter (title, nav, order)
-  templates/*.html   # لی‌آوت veb (header/nav/footer، dark-mode)
-  static/css|js|img  # vanilla، بدون بیلد
-  veb_site.v         # routeها + handle_static + export به dist/
-  config.json        # درخت nav، ورژن، لینک GitHub
-dist/                # خروجی build (منتشر شود، سورس نیست)
+  PLAN.md            # this file (the plan; update it as the build proceeds)
+  content/**/*.md    # one page per file + frontmatter (title, nav, order)
+  templates/*.html   # veb layout (header/nav/footer, dark mode)
+  static/css|js|img  # vanilla, no build step
+  veb_site.v         # routes + handle_static + export to dist/
+  config.json        # nav tree, version, GitHub link
+dist/                # build output (published; not source)
 ```
 
-## 6. مراحل اجرا (موقع ساخت — هر کدام code + test + خط داک)
+## 6. Execution steps (at build time — each one is code + test + docs line)
 
-1. Content inventory: استخراج API واقعی هر ماژول + خلاصه ADRها.
-2. IA + `config.json`: درخت nav بخش ۲ + frontmatter.
-3. Scaffold `veb_site.v`: routeها (`/`, `/docs/:path...` fallback،
-   `/llms.txt`) + `handle_static` + `not_found` + تست pure-V (سبز روی Windows).
-4. Templates + CSS: لی‌آوت، highlight کد hello، dark-mode،
-   `focus-visible`، جستجوی client-side (index JSON استاتیک).
-5. Port محتوا از بخش ۴ (فقط از سورس واقعی، بدون حدس).
-6. Export + preview: `v run docs/site --export` → `dist/`؛
-   `v -d veb_livereload watch run docs/site` برای نویسندگی.
-7. Verify + close: `v fmt -w .`، `v test .` سبز ویندوز؛ لینک Pages؛
-   تیک ROADMAP؛ یک خط در CONTEXT.md (قانون Definition of done).
+1. Content inventory: extract each module's real API + an ADR summary.
+2. IA + `config.json`: the §2 nav tree + frontmatter.
+3. Scaffold `veb_site.v`: routes (`/`, a `/docs/:path...` fallback, `/llms.txt`)
+   + `handle_static` + `not_found` + pure-V tests (green on Windows).
+4. Templates + CSS: layout, hello-code highlighting, dark mode, `focus-visible`,
+   client-side search over a static JSON index.
+5. Port the content from §4 — only from real source, no guesswork.
+6. Export + preview: `v run docs/site --export` → `dist/`;
+   `v -d veb_livereload watch run docs/site` for authoring.
+7. Verify + close: `v fmt -w .`, `v test .` green on Windows; wire up Pages;
+   tick the ROADMAP box; one line in CONTEXT.md (the Definition-of-done rule).
 
-## 7. CI و انتشار روی GitHub Pages
+## 7. CI and publishing to GitHub Pages
 
-> اضافه‌شده ۲۰۲۶-۱۰-۰۴. بخش ۷ قبلاً فقط «`dist/` به GitHub Pages می‌رود» می‌گفت
-> بدون اینکه بگوید **چه کسی** آن را می‌برد. جواب یک workflow جداست، و چون
-> `ci.yml` از قبل یک precedent دارد، این بخش به‌جای یک فایل تازه همان
-> قرارداد را دنبال می‌کند.
+> Added 2026-10-04. The previous §7 said only that "`dist/` goes to GitHub
+> Pages", without saying **what** carries it there. The answer is a new workflow,
+> and since `ci.yml` already exists this section follows its conventions rather
+> than inventing a new file's.
 
-### چرا یک workflow جدا و نه یک step در `ci.yml`
+### Why a separate workflow and not a step in `ci.yml`
 
-`ci.yml` سه job دارد (`linux` / `windows` / `release`) و هر سه **دروازه** هستند:
-اگر `v test .` قرمز شود، انتشار نباید اتفاق بیفتد. اما سایت یک محصول جانبی است
-و دو خاصیت متفاوت دارد:
+`ci.yml` has three jobs (`linux` / `windows` / `release`) and all three are
+**gates**: if `v test .` goes red, publishing must not happen. But the site is a
+by-product with two different properties:
 
-- **سریع است.** یک SSG که ۲۰ صفحه را می‌سازد، ثانیه‌ها طول می‌کشد؛ کش کردن
-  کل `docker build` تصویر V برای آن، اتلاف وقت runner است.
-- **شکستش نباید قرمزِ سبز را قرمز کند.** یک لینک شکسته در داک، دلیلی ندارد که
-  build دسکتاپ را متوقف کند؛ اما اگر در همان workflow باشد، `required check`
-  ها برای PRها همه‌چیز را گروگان می‌گیرند.
+- **It is fast.** An SSG that builds 20 pages takes seconds; paying for the
+  whole V container image to do it is wasted runner time.
+- **Its failure must not redden a green build.** A dead link in the docs has no
+  reason to stop the desktop build — but inside one workflow it would, and the
+  `required checks` would hold every PR hostage.
 
-پس: `docs.yml` جدا، با `paths`-فیلتر روی `docs/site/**` و فایل‌هایی که داک از
-آن‌ها ساخته می‌شود.
+So: `docs.yml` is separate, with a `paths:` filter over `docs/site/**` plus the
+files the docs are built from.
 
-### شکل workflow
+### Workflow shape
 
 ```yaml
 name: Docs
@@ -183,70 +191,74 @@ on:
     branches: [main]
     paths: ['docs/site/**', 'CONTEXT.md', 'docs/ADR/**', 'v.mod', '.github/workflows/docs.yml']
   pull_request:
-    paths: [همان فهرست بالا]   # همچنین باید تغییر داک، PR را بررسی کند
+    paths: [same list as above]   # a docs change must check the PR too
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
-  id-token: write          # لازم برای artifact deployment
+  id-token: write          # required for artifact deployment
 
 concurrency:
   group: pages
-  cancel-in-progress: true # یک استقرار همزمان برای یک شاخه، بی‌معنا
+  cancel-in-progress: true # two concurrent deployments of one branch is meaningless
 
 jobs:
   build:
-    # یک container لازم نیست: سایت هیچ Cای کامپایل نمی‌کند (فقط veb خالص V)،
-    # پس یک V در vlib کافی است. این عمداً از linux job جدا نوشته شده.
+    # No container: the site compiles no C (pure-V veb only), so a V with a
+    # vlib is enough. Deliberately not folded into the linux job.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-v@v2
         with: { version: 'v0.5.2' }
-      - run: v -prod run docs/site -- --export     # dist/ را می‌نویسد
+      - run: v -prod run docs/site -- --export     # writes dist/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with: { path: docs/site/dist }
 ```
 
-### چهار تصمیم که باید آگاهانه گرفته شوند
+### Four decisions that have to be made deliberately
 
-1. **`v -prod` در build، نه `v run`.** دلیلش در بخش ۳ هست: با `-prod` تمپلیت‌ها
-   کامپایل می‌شوند، پس **خطای تمپلیت در CI می‌ترکد** نه در بازدیدکننده. این تنها
-   دلیلی است که این مرحله وجود دارد و نباید با «سریع‌تر است» توجیه شود.
-2. **`dist/` کامیت نمی‌شود.** دو گزینه است: gitignore (ساده) یا branch جدا مثل
-   `gh-pages`. branch جدا برای SEO بهتر است (URL پایدار) ولی یک تنظیم
-   deployment اضافه می‌خواهد؛ **پیش‌فرض: gitignore + artifact deployment**،
-   و اگر روزی index‌شدن لازم شد، مهاجرت به branch جدا یک تغییر است نه بازنویسی.
-3. **`404.html` لازم است.** GitHub Pages برای مسیر ناشناخته `404.html`
-   می‌خواهد؛ `not_found()` کاستوم veb باید دقیقاً همین نام را تولید کند، وگرنه
-   یک صفحه ۴۰۴ پیش‌فرض Pages با لینک‌های شکسته نمایش داده می‌شود.
-4. **`llms.txt` باید در artifact باشد**، نه فقط پشت `enable_markdown_negotiation`
-   زنده. Pages یک CDN است و مذاکرهٔ هدر روی آن قابل اتکا نیست؛ اگر مسیر
-   `/docs/x` با `Accept: text/markdown` جواب می‌دهد ولی `/x.md` نه، آن قابلیت
-   روی Pages یک رفتار متفاوت از preview است. **باید هر دو تولید شوند.**
+1. **`v -prod` in the build, not `v run`.** The reason is in §3: with `-prod` the
+   templates are compiled, so **a template error breaks CI** rather than a
+   visitor. That is the only justification for the step, and it must not be
+   re-justified as "it is faster".
+2. **`dist/` is not committed.** Two options: gitignore (simple) or a separate
+   branch such as `gh-pages`. A branch is better for SEO (a stable URL) but costs
+   an extra deployment setting; **default: gitignore + artifact deployment**, and
+   if indexing is ever needed, moving to a branch is a change rather than a
+   rewrite.
+3. **`404.html` is required.** GitHub Pages serves `404.html` for an unknown
+   path, so veb's custom `not_found()` must produce exactly that filename —
+   otherwise Pages' own 404 is shown, with broken navigation.
+4. **`llms.txt` must be in the artifact**, not only left to a live
+   `enable_markdown_negotiation`. Pages is a CDN and header negotiation is not
+   dependable behind one: if `/docs/x` answers `Accept: text/markdown` but `/x.md`
+   does not, that capability behaves differently on Pages than it did in preview.
+   **Both must be produced.**
 
-### آنچه هنوز اثبات نشده
+### What is still unproven
 
-هیچ‌کدام از این‌ها اجرا نشده. `ci.yml` در این ریپو هنوز **هیچ job سبزی
-ندارد** (ROADMAP «B2+B3 — اجرا شده، درست شده، اثبات نشده»)، پس «Pages
-استقرار می‌دهد» ادعایی است که فقط یک اجرای واقعی می‌تواند بی‌معنا یا
-اشتباهش کند. ترتیب درست: اول `docs.yml` را اضافه کن، بعد **یک push واقعی به
-`main` بفرست و خروجی را بخوان**، و بعد در `ROADMAP.md` یک خط بنویس که چه شد.
+None of this has been run. `ci.yml` in this repository still has **no green job**
+(ROADMAP records B2+B3 as "executed, fixed, unproven"), so "Pages deploys it" is
+a claim only a real run can falsify. The right order: add `docs.yml`, then
+**push to `main` for real and read the output**, then write one line in
+`ROADMAP.md` saying what happened.
 
-خود `veb` هم اثبات نشده: `handle_static` و `--export` روی V 0.5.2 در این
-ریپو **هیچ‌وقت کامپایل نشده‌اند** (بخش ۷ قدیم، ریسک اول). یک spike ده‌خطی قبل
-از هر چیز.
+`veb` itself is unproven too: `handle_static` and `--export` have **never been
+compiled** in this repository on V 0.5.2 (old §7, risk one). A ten-line spike
+before anything else.
 
-## 8. ریسک‌ها
+## 8. Risks
 
-- تغییر API `veb` بین نسخه‌های 0.5.x → اول spike کوچک `handle_static`.
-- رندر Markdown خالص V (`x.markdown`) محدود است → md→HTML در build-time
-  با همان تمپلیت veb، بدون dependency جدید.
-- اگر Phase 7 دیر شد: اول Home + getting-started + quickstart + یک API
-  مرج شود، بقیه incremental.
-- **داک و سایت هم‌زمان کهنه می‌شوند.** یک صفحه داک که دستی نوشته شده بعد از
-  یک release غلط است. قاعده‌ای که پیشنهاد می‌شود: هر چیزی که *می‌تواند* از
-  سورس تولید شود (`vails --help`، `v doc`، `--out d.ts`) تولید شود، و متن
-  دستی فقط جایی بماند که تولیدش ممکن نیست. این تصمیم است، نه کارآمدی.
+- `veb`'s API changes across 0.5.x → spike `handle_static` small first.
+- Pure-V Markdown rendering (`x.markdown`) is limited → md→HTML at build time
+  using veb's own template, with no new dependency.
+- If Phase 7 runs late: ship Home + getting-started + quickstart + one API
+  reference first, the rest incrementally.
+- **The docs and the site go stale together.** A hand-written docs page is wrong
+  after any release. The recommended rule: anything that *can* be generated from
+  source (`vails --help`, `v doc`, `--out d.ts`) is generated, and hand-written
+  prose survives only where generation is impossible. That is a decision, not an
+  optimisation.
