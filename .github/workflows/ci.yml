@@ -109,7 +109,16 @@ jobs:
         # even `cc1` cannot find its own DLLs, which fails as a SILENT gcc
         # failure rather than a missing-symbol error. GITHUB_PATH only
         # affects subsequent steps, which is exactly the scope wanted.
-        run: "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        # SINGLE quotes, and they are load-bearing. A YAML double-quoted scalar
+        # processes backslash escapes, and `\m` is not one - so the double-quoted
+        # form of this line was not valid YAML at all. GitHub rejects the whole
+        # file, reports "This run likely failed because of a workflow file issue",
+        # and runs zero jobs in 0s. That is the second, distinct cause of the same
+        # symptom `buildplan/workflow_test.v` was written for: it caught the
+        # indentation break, and it cannot catch this, because a line-prefix check
+        # cannot see inside a scalar.
+        run: |
+          'C:\msys64\ucrt64\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: v test .
         # The `-ldflags` is not optional **on V 0.5.2**, which is what the winget

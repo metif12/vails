@@ -113,6 +113,57 @@ fn test_the_ci_workflow_indents_with_spaces_never_tabs() {
 		'parse error names neither the line nor the tab'
 }
 
+// The SECOND cause of "No jobs were run", found 2026-10-05 after the three
+// tests above had been green for two days while every run still failed.
+//
+// This file was invalid YAML for a reason no line-prefix check can see:
+//
+//     run: "C:\msys64\ucrt64\bin" | Out-File ...
+//
+// A YAML **double-quoted scalar** processes backslash escapes, and `\m` is not
+// one. GitHub rejects the whole file, says "This run likely failed because of a
+// workflow file issue", and runs zero jobs in 0s — the same symptom as the
+// indentation break, from an unrelated cause. The shell command was fine; the
+// YAML quoting around it was not.
+//
+// So the header's claim that "the failure is textual, so the property is textual
+// too" was a FALSE GENERALISATION from one instance. Line position is textual;
+// what happens INSIDE a scalar is not, and the second defect lived there.
+//
+// The fix is a `run: |` block with the path single-quoted, which is also what
+// every neighbouring step already does. The check below is still textual and
+// still needs no YAML dependency — it just asks the question the first three did
+// not: is there a double-quoted scalar here at all?
+//
+// Scope, stated so it is not over-read: this catches backslashes in double-quoted
+// scalars, which is the defect that actually shipped. It is not a YAML parser
+// and does not claim to be. A file can still be invalid YAML without tripping it,
+// and the honest end state is a real parse in CI - which, as it happens, is the
+// first thing the workflow itself would have to survive to reach.
+fn test_the_ci_workflow_has_no_backslash_in_a_double_quoted_scalar() {
+	mut bad := []string{}
+	for i, raw in ci_text().split_into_lines() {
+		line := raw.trim_space()
+		if line.starts_with('#') {
+			continue
+		}
+		// Only a `key: "value"` position is a YAML scalar. A double quote inside
+		// a `run: |` block is shell text - PowerShell string quoting - and
+		// backslashes there are exactly what the author meant.
+		if !line.contains(': "') {
+			continue
+		}
+		if line.contains('\\') {
+			bad << 'line ' + (i + 1).str() + ': ' + line
+		}
+	}
+	assert bad.len == 0, 'these lines of .github/workflows/ci.yml have a ' +
+		'backslash inside a DOUBLE-QUOTED YAML scalar: ' + bad.join(' | ') +
+		' - YAML interprets \\m and \\u as escape sequences there, so the file ' +
+		'does not parse, GitHub rejects it and runs zero jobs in 0s. Use a ' +
+		'`run: |` block (backslashes are literal there) or single quotes'
+}
+
 fn test_the_ci_workflow_still_declares_every_job() {
 	// The same "No jobs were run" symptom, one cause further out: a workflow whose
 	// `jobs:` block was emptied, renamed or truncated reports identically to one
