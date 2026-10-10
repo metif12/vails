@@ -99,6 +99,18 @@ Conventions for this file:
 
 ### Changed
 
+- **`vails doctor` resolves the Windows toolchain instead of asserting one
+  machine's path** (ADR-0038). The `webview` line checked
+  `C:/msys64/ucrt64/include/webview/webview.h` literally, so a relocated or
+  scoped toolchain was reported against the one root that cannot be the answer.
+  It now goes through `buildplan.resolve_toolchain()` — already the tested owner
+  of that decision, previously with no production caller — and a new
+  `toolchain` line names the resolved root and where it came from. An unset
+  `VAILS_TOOLCHAIN` prints the same header path as before, because the default
+  *is* that root; a set one follows, and any missing piece (`webview.h`,
+  `libwebview.dll.a`, the `bin` directory holding the five side-by-side DLLs) is
+  listed once, here, instead of surfacing as a header error three minutes into a
+  build.
 - **`vails doctor` now names the cause of an unavailable toast**
   (ADR-0039). It previously reported `REGDB_E_CLASSNOTREG`, whose two causes -
   a wrong AppUserModelID and a Windows with no WinRT class store - need opposite
@@ -591,13 +603,16 @@ Conventions for this file:
 
 ### Not done in this release
 
-- **The `vails` CLI cannot read `vails.json`.** This is a V master bug, not a
-  Vails one: on `vlang/v` master, `json2.decode[T]` returns a **zero-valued
-  struct with no error** when the module declaring `T` is named `config` **and**
-  `net.http` is linked into the same binary. `cli` imports `dev` (which imports
-  `net.http`), and this repository's config module is named `config`, so
-  `vails doctor`, `vails run`, `vails build` and `vails dts` all report
-  `vails.json: name must not be empty` on a project whose config is valid.
+- **The `vails` CLI cannot read `vails.json`.** *(Fixed in the compiler, on
+  2026-10-10 — see the end of this entry. Kept under "Not done" because the
+  property of this repository it exposed is still true, and the guard that
+  records it is unchanged.)* This was a V master bug, not a Vails one: on
+  `vlang/v` master, `json2.decode[T]` returns a **zero-valued struct with no
+  error** when the module declaring `T` is named `config` **and** `net.http` is
+  linked into the same binary. `cli` imports `dev` (which imports `net.http`),
+  and this repository's config module is named `config`, so `vails doctor`,
+  `vails run`, `vails build` and `vails dts` all reported
+  `vails.json: name must not be empty` on a project whose config was valid.
 
   Bisected one variable at a time; the full table is in `AGENTS.md` §1b, and the
   upstream report is [vlang/v#29508](https://github.com/vlang/v/issues/29508).
@@ -609,27 +624,31 @@ Conventions for this file:
     module name is the axis. `conf`, `configx` and `xconfig` all work; `config`
     does not. So it is the exact identifier, not a prefix rule.
 
-  Two further consequences worth stating plainly:
+  Two consequences worth stating plainly:
 
-  - **`v test .` is 45/45 green and cannot catch this.** Each `_test.v` is its
-    own binary, and no test file imports both `dev` and `config`, so the one
-    combination that breaks is never linked in a test.
-  - **The checked-in `examples/*/frontend/vails.d.ts` files cannot be
-    regenerated**, so they are one release behind the generator: the
-    blocking-command JSDoc described under **Changed** is in `services/dts.v`
-    but **not yet in those three files**. They must not be hand-edited, which is
-    why this is listed rather than patched.
+  - **`v test .` was 45/45 green and could not catch this.** Each `_test.v` is
+    its own binary, and no test file imports both `dev` and `config`, so the
+    one combination that breaks was never linked in a test. That is a property
+    of this repository's test layout and it is still true.
+  - **The checked-in `examples/*/frontend/vails.d.ts` files were one release
+    behind the generator**, carrying the blocking-command JSDoc from
+    `services/dts.v` but not in the files themselves. They must not be
+    hand-edited, so the gap was listed rather than patched.
 
   `buildplan/json2_import_test.v` guards the shape of the exposure — `net.http`
   keeps exactly one importer, that importer and every `json2.decode`
   instantiator stay **disjoint**, and `cli` is still where the two meet — so the
   combination cannot be widened without a red test. It cannot assert the bug
   itself: a test that reproduces it would pass only while the compiler is broken
-  and would go red on the fix.
+  and would go red on the fix. **It is unchanged by the fix**, because it is
+  about this repository, not about V.
 
-  Fixing it is upstream's. Locally the only way to unblock the CLI is to keep
-  `net.http` out of the binary that reads config, which means `vails run`
-  spawning a helper process. Not done.
+  **Status: gone.** Re-measured 2026-10-10 on V master `ef2ec06` — the same
+  program across three fresh project roots decodes correctly, `vails doctor`
+  reports `vails.json : ok`, and all three example declarations were
+  regenerated with their blocking-command JSDoc. Nine `json2` commits landed
+  between the two builds and **which one fixed it is not bisected**, so it is
+  not attributed here.
 - **`menu.set_menu` is unproven at runtime on Windows.** It compiles and links,
   and the pure-V classifier behind it (`bar_click`) is unit-tested on every
   platform, but the E2E window would not come up in the capture session, so

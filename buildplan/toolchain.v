@@ -2,10 +2,11 @@
 //
 // ## What this module is for
 //
-// Four places used to name `C:/msys64/ucrt64` in code: the webview backend's
-// `#flag` lines, `buildplan.ucrt64_bin`, `vails doctor`, and CI. A toolchain
-// that is only reachable by editing four files is a toolchain nobody can move, so
-// this resolves it once, from one knob, and every caller asks here.
+// Three places still name `C:/msys64/ucrt64` in code: the webview backend's
+// `#flag` lines, `buildplan.ucrt64_bin`, and CI. `vails doctor` was the fourth,
+// and a toolchain that is only reachable by editing the files that happen to
+// name it is a toolchain nobody can move, so this resolves it once, from one
+// knob, and every caller asks here.
 //
 // ## What it deliberately does NOT do
 //

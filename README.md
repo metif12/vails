@@ -165,9 +165,11 @@ webview packages inside the ucrt64 shell:
 pacman -S mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader
 ```
 
-`vails doctor` looks for the header at
-`C:/msys64/ucrt64/include/webview/webview.h` — if it reports MISSING, the
-`pacman` step above is what fixes it.
+`vails doctor` looks for the header under the *resolved* toolchain root, whose
+default is `C:/msys64/ucrt64` (so it looks at
+`C:/msys64/ucrt64/include/webview/webview.h`). Set `VAILS_TOOLCHAIN` to move it —
+the `toolchain` line reports the root and where it came from. If the header is
+MISSING, the `pacman` step above is what fixes it.
 
 Runtime DLLs are **not** linked statically. After every Windows build, copy
 these next to the `.exe` (all from `C:\msys64\ucrt64\bin`):
@@ -263,8 +265,9 @@ v -o vails ./cli
 #   v version : check with `v version` (need 0.5.x)
 #   os        : windows | linux | ...
 #   on Linux  : webkit2gtk version or MISSING + apt hint
-#   on Windows: gcc version + webview.h found/MISSING + pacman hint,
-#              and how many of the 5 side-by-side DLLs are present
+#   on Windows: the resolved toolchain root (VAILS_TOOLCHAIN, default
+#              C:/msys64/ucrt64) + gcc version + webview.h found/MISSING +
+#              pacman hint, and how many of the 5 side-by-side DLLs are present
 #   vails.json: ok | INVALID + reason | not found (optional here)
 #   services  : which services the capabilities grant (T5)
 #   backends  : which services have a NATIVE backend on this machine, and

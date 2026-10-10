@@ -562,17 +562,35 @@ fn doctor(args []string) {
 			println('  appindicator: MISSING (sudo apt install libayatana-appindicator3-dev - the tray service needs it)')
 		}
 	} $else $if windows {
+		// The toolchain root comes first, because the two lines below it
+		// are about that root and a root the user did not expect is the
+		// whole mismatch ADR-0038 is about. `summary` names the root and
+		// where it came from, which is the pair that answers "why did it
+		// pick that" without opening this file.
+		tc := buildplan.resolve_toolchain()
+		println('  toolchain   : ' + tc.summary())
 		gcc := os.execute('gcc --version')
 		if gcc.exit_code == 0 {
 			println('  gcc         : ' + gcc.output.split_into_lines()[0])
 		} else {
 			println('  gcc         : MISSING (install MSYS2 ucrt64 toolchain + put C:\\msys64\\ucrt64\\bin on PATH)')
 		}
-		header := 'C:/msys64/ucrt64/include/webview/webview.h'
+		// The header is looked up through the resolver rather than against
+		// a literal — a machine with a relocated or scoped toolchain used to
+		// be told about the one root that cannot be the answer (ADR-0038).
+		// The default is unchanged, so an unset VAILS_TOOLCHAIN prints the
+		// same path it printed before.
+		header := tc.include + '/webview/webview.h'
 		if os.exists(header) {
 			println('  webview     : header found (' + header + ')')
 		} else {
 			println('  webview     : MISSING (pacman -S mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader)')
+		}
+		// Everything else the resolver could not find, all at once rather
+		// than one failed build at a time. A whole toolchain prints nothing
+		// here, which is why this loop is not on the happy path.
+		for problem in tc.problems {
+			println('               ! ' + problem)
 		}
 		// The five DLLs a built app cannot start without. Reported as a
 		// count of what is actually present, because `vails build` copies
