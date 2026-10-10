@@ -20,6 +20,40 @@ Conventions for this file:
 
 ### Changed
 
+- **The `json2` zero-decode bug no longer reproduces, and the three `.d.ts` are
+  regenerated.** The compiler moved from `bb0d229` to `ef2ec06` while this branch
+  was open and the bug stopped reproducing — verified across three fresh project
+  roots, `vails doctor` reporting `vails.json : ok`, and `vails dts` regenerating.
+  The blocking-command JSDoc now reaches all three checked-in declarations
+  (11 added lines, no churn). `buildplan/json2_import_test.v` is unchanged: it is a
+  guard on this repository's test layout, and a second `net.http` importer goes red
+  at review time now rather than at `vails doctor` time. AGENTS.md 1b records the
+  whole thing, including **two explanations that were offered and then killed** —
+  the `_str_N` literal collision (refuted by a control: an *unused* `import sync`
+  changes 507 of 2160 identical-index literals and both programs decode
+  correctly) and "a module named `cfg` is special too" (refuted: it is a *variable*
+  named `cfg` colliding with `import cfg`; a module named `zzz` with a variable
+  `zzz` fails identically).
+- **A documentation accuracy pass on the one file the last pass only partly
+  reached.** `ROADMAP.md` carried four claims that had been overtaken, and all four
+  under-stated what the project now does:
+
+  - *"`menu.png` / `tray.png` / `dialog.png` exist"* — `git log --all` returns zero
+    commits for all three. ADR-0017 and ADR-0027 are where the citations were fixed;
+    this file had been left saying the screenshots exist.
+  - *"the runner has still never reported a single green job"* — the Linux container
+    job passes, and this branch is what took it there.
+  - *"this machine crashes its host on the `webview` test module"* — all six files
+    compile **and** run, twice, at 45/45, on the same compiler both measurements
+    were made against. Kept as history, labelled *currently green* rather than
+    *fixed*, because **what changed is not known**.
+  - the priority table called F1 drag & drop "planned" — it landed as ADR-0036 on
+    2026-10-03. The next unwritten row is W1-W4.
+
+  `ADR-0038` gains a dated implementation note rather than a rewrite: the resolver
+  now has a production caller (`vails doctor`), an unset `VAILS_TOOLCHAIN` prints
+  the byte-identical header path as before, a set one no longer reports the default
+  root as healthy, and the `#flag` half is still unwritten and still uncompiled.
 - **Documentation accuracy pass, 2026-10-05.** No behaviour changed; three
   documents no longer cite screenshots that have never existed in this repository.
   `git log --all` returns **zero commits** for `tests/e2e_windows/tray.png`,

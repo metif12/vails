@@ -7,7 +7,7 @@ current position, then what has shipped, then the priority table that decides
 what happens next. Anything about *why* something took three attempts belongs in
 an ADR, not here.
 
-## Where we are (2026-10-04)
+## Where we are (2026-10-10)
 
 | | |
 |---|---|
@@ -15,7 +15,7 @@ an ADR, not here.
 | `v test webview` on Windows | **green as of 2026-10-05** — all six `webview` files compile *and* run, twice, inside a full `v -cc gcc test .` (45/45). This contradicts the measurement recorded here until today: **"cannot be run: it takes the host down"**, measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with no OOM in the Windows event log. **What changed is not known**: the tests needed no editing to pass, and the compiler is the same 0.5.2 master as both earlier measurements. So treat this as *currently green*, not *fixed* — if it starts taking the host down again, this row is the history and the F0 work since 2026-10-03 is the first thing to suspect. |
 | `v test .` on Linux | **45/45 test files green** — measured 2026-10-05 in the CI container, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. |
 | Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
-| Next by the table | **the Linux suite is green** (below). Next: F1, then W1–W4 |
+| Next by the table | **the Linux suite is green** (below) and F1 has landed (ADR-0036), so the next unwritten row is **W1–W4** — frameless window chrome plus a `window` service, 6 d. Note what W1–W4 needs: native C interop on two platforms and a human to drag a window edge, so it is not a session of work |
 | **Build-blocked on** | *nothing. The `vails.json` blocker that sat here on 2026-10-05 was a V master bug and stopped reproducing once V moved to `ef2ec06`; AGENTS.md §1b records the whole thing, including why the guard stays.* |
 | Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
 
@@ -191,19 +191,21 @@ code in this repo should read §2c before it is written.
 The repo's own rule (AGENTS.md §5) is that a line either names a proof or says it
 is unproven. The four things most likely to be over-read:
 
-- **B2+B3 (Dockerfile + CI): the CI has now been RUN once, and it is fixed but
-  still unproven.** The "never executed" claim was true until 2026-10-03, when it
-  was executed on GitHub and reported **"No jobs were run"** — one step had lost
-  its indentation, so the workflow was invalid YAML and GitHub had no jobs to
-  run. Fixed, and `buildplan/workflow_test.v` now guards it (the guard was
-  confirmed **red on the broken file and green on the fixed one**, which is the
-  only way to know a guard guards). The runner has still never reported a single
-  green job, so "CI is green" remains a claim nobody can make: the first real run
-  may well stop at the `json2` smoke step, which exists precisely to turn a
-  confusing failure into a named one.
-- **The Linux GUI proofs need a real session.** `menu.png` / `tray.png` /
-  `dialog.png` exist; the Linux `menu:clicked {id}` mapping does not, because Xvfb
-  has no window manager to deliver the click.
+- **B2+B3 (Dockerfile + CI): the Linux job is green and the Windows one is not,
+  and neither of those is the same as "CI is green".** The "never executed" claim
+  was true until 2026-10-03. Since then the Linux container job has **passed
+  repeatedly** (5m36s on the branch in #1, after starting at 20 of 44 test files
+  failing); the Windows job **still fails**, at the step that checks whether the
+  runner's own V can build this repository at all — it installs a *released* V,
+  and no release has `json2`. So the accurate statement is "one of the two jobs is
+  green", and the more useful one is "the Linux suite is now proven on a clean
+  runner", which is something this file could not say before.
+- **The Linux GUI proofs need a real session, and three of the screenshots this
+  file used to cite have never existed.** `git log --all` returns **zero commits**
+  for `tests/e2e_windows/tray.png`, `tests/e2e_windows/menu.png` and
+  `tests/e2e_linux/dialog.png`, yet ADR-0017 and ADR-0027 both cited them as their
+  evidence — the errata on those ADRs record it. The Linux `menu:clicked {id}`
+  mapping does not, because Xvfb has no window manager to deliver the click.
 - **`post_to_main` is Windows-only.** On Linux it refuses by name; the
   `g_idle_add` trampoline is unwritten, and it is the first push onto the GTK
   main loop from a foreign thread in this repo's history.
@@ -230,14 +232,19 @@ is unproven. The four things most likely to be over-read:
   `Windows.winmd` or `UniversalApisContract.winmd`). Flipping that constant is
   the whole remaining work, and guessing a GUID instead would activate the wrong
   object.
-- **F0's second Windows window is written and type-checked, not observed.** The
-  COM apartment that unblocks it is in `webview_windows.c.v` and `v vet webview`
-  is green, but **this machine crashes its host on the `webview` test module** —
-  measured three times on 2026-09-30, with one test file at a time and with the
-  whole directory, and with no OOM in the Windows event log, so the cause is
-  still unknown. Until somebody runs `examples/multiwindow` and puts two windows
-  in a screenshot, "multi-window works" is a claim. Every other module's tests
-  pass: 15 of 16 modules green on 2026-09-30, and `webview` is the sixteenth.
+- **F0's second Windows window is written and type-checked, not observed** — and
+  the *reason* it was not observed has changed shape, so read the next paragraph
+  before repeating it. Until 2026-10-05 this entry said the `webview` test module
+  crashes the Windows host (measured three times on 2026-09-30, one file at a time
+  and as a directory, no OOM in the event log). On 2026-10-05 all six `webview`
+  test files compiled **and ran**, twice, inside a full `v -cc gcc test .` at
+  45/45, on the same 0.5.2 master both measurements were taken against and with
+  no test edited to make them pass. **What changed is not known**, so treat this as
+  *currently green*, not *fixed* — it is recorded as history in the "Where we are"
+  table above, and F0's work since 2026-10-03 is the first thing to suspect if it
+  starts taking the host down again. The reason it is listed here anyway is the
+  part that did not change: nobody has run `examples/multiwindow` and put two
+  windows in a screenshot, so "multi-window works" is still a claim.
 
 ## Corrections worth remembering
 
@@ -274,7 +281,7 @@ Effort is in focused days and is an estimate, not a commitment.
 | 6 | B0 | **B2+B3** Dockerfile + matrix CI | 4 d | P2–P4, B4 | the repo has no CI; `v test .` is green on both platforms already | **done, unproven (ADR-0034)** — no runner or container here |
 | 7 | — | **U0/W0** `post_to_main` | 3 d | U4–U7, W1–W4 | three dependents; also the job half of ADR-0019 (its subscriber half shipped as ADR-0023) | **done on Windows (ADR-0019)** — `jobs.v` + a real E2E screenshot; Linux `g_idle_add` deferred |
 | 8 | — | **F0** multi-window | 6 d | **W**, `tray.set_menu`, U4's second window | highest-leverage single item; reopens an ADR-0020 decision | **done, PROVEN on Windows (ADR-0035, 2026-10-04)** — 21 routing tests + a real two-window run that found two shipped bugs (`webview_dispatch` success read as failure, then an access violation inside the DLL); Linux structurally done, unrun |
-| 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | planned |
+| 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | **done, and the gating question is answered** (ADR-0036, 2026-10-03) - `EnableWebDrop` is **not reachable**: the installed `webview` 0.12 header exposes no `ICoreWebView2Controller`, so the design went to `WM_DROPFILES` on the HWND instead. The observable proof is the outstanding half: nothing has seen a human drag a file |
 | 10 | U0 | **W1–W4** chrome + `window` service | 6 d | the tutorial's menu item, E6 | absorbs S1 wave-4 `window-state`/`positioner` | planned |
 | 11 | W, F0 | **U1–U4** updater core + service | 8 d | U5, P4 | the manifest-as-core half is pure V and no I/O | planned |
 | 12 | B1–B4 | **P0–P4** distribution | 8 d | release | the update-channel policy is decision-only and independent | planned |
