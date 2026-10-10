@@ -1257,11 +1257,16 @@ a small platform nicety, or a non-goal with a reason attached.
   - **Paths, never contents.** A page that wants a file's bytes has to be given
     a way to ask; that capability should be granted on its own rather than
     inherited by every window that can receive a drop.
-  - **Linux is unwritten on purpose** (AGENTS.md §3.4, ADR-0015's lesson: no
-    native code that has never been compiled, and there is no Linux runner
-    here). Everything that is not native is done and tested; the gap is a
-    `GtkDropTarget` and one function. `doctor` says "unwritten", not
-    "unsupported", because only one of those is true.
+  - **Linux is unwritten on purpose** (ADR-0015's lesson: no native code that has
+    never been compiled). Everything that is not native is done and tested; the
+    gap is a `GtkDropTarget` and one function. `doctor` says "unwritten", not
+    "unsupported", because only one of those is true. **The reason for leaving it
+    unwritten has expired**, which is why this line is corrected rather than left:
+    it used to add "and there is no Linux runner here", and on 2026-10-10 that is
+    false — `Dockerfile` builds a pinned V from source and runs the whole suite
+    45/45 green with GTK C compiled in, and `run_headless.sh` runs a real app
+    under Xvfb. So the remaining gap is the code and not the ability to prove it,
+    and `drop_linux.c.v`'s header now says so.
   - **Still unchecked, and for the same reason as F0**: nothing has seen a human
     drag a file, because the Windows GUI proofs go through the `webview` module
     that crashes this host. The outstanding run is the six-step procedure in

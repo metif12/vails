@@ -339,18 +339,24 @@ pub fn drop_support() ServiceStatus {
 				'WebView2 child'
 		}
 	} $else $if linux {
-		// Not a stub by accident: the GTK half is a GtkDropTarget on the window,
-		// and writing GTK C that has never been compiled is how the wave-3 Linux
-		// build broke for four ordinary reasons while being blamed on V
-		// (ADR-0015). The pure-V half - the bounds, the payload, the policy -
-		// is written and tested on both platforms, so only the native read is
-		// missing.
+		// Not a stub by accident, and **not blocked any more either**. This branch
+		// used to justify itself with "this machine has no Linux runner", and that
+		// expired on 2026-10-05: `Dockerfile` builds a pinned V from source and runs
+		// 45/45 green with GTK C compiled in, and
+		// `tests/e2e_linux/run_headless.sh` runs a real app under Xvfb. So the
+		// honest statement is now only that the half is unwritten - the environment
+		// to write it against exists.
+		//
+		// The pure-V half - the bounds, the payload, the policy - is written and
+		// tested on both platforms, so only the native read is missing.
+		// `drop_linux.c.v` says the same at the file level, including what the
+		// pinned toolchain means for anyone who does write it.
 		return ServiceStatus{
 			name:  'drop'
 			ready: false
-			note:  'the GTK drop-target half is unwritten (no GtkDropTarget yet - ' +
-				'ADR-0015 lesson: no native code that has never compiled); the ' +
-				'bounds, the payload and the policy are done'
+			note:  'the GTK drop-target half is unwritten (one function of C - a ' +
+				'GtkDropTarget on the toplevel reading text/uri-list); the bounds, ' +
+				'the payload and the policy are done and tested here'
 		}
 	} $else {
 		return ServiceStatus{

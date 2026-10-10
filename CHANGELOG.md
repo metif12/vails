@@ -20,6 +20,28 @@ Conventions for this file:
 
 ### Changed
 
+- **The V pin moved to `60542b9`, because the first pin carried a Linux linker
+  regression that a green suite hid.** `ef2ec06` was the first pin and it was
+  right about the `json2` defect — but it emits `undefined reference to
+  closure__closure_try_destroy` from `vlib/os`'s `execve`/`execvp` paths, twice
+  per suite run. V recovers on its own, so **the summary still said 45/45**, which
+  is the cache-staleness trap one layer down: a green run that hides a broken
+  compiler. `10a210b` ("modulecache: own constants and emit cached
+  declarations on demand") landed after it and is the likely fix; verified on this
+  commit — the `json2` repro decodes correctly both ways, **no linker errors
+  anywhere in the run**, and `vails doctor` reports `vails.json : ok`. The
+  Dockerfile now names the regression, and the bump procedure says to grep for
+  `collect2` / `undefined reference` rather than trusting the summary line.
+- **`drop`'s Linux half is the last deliberate stub, and its stated reason for
+  being one expired.** `drop_linux.c.v` and `drop_support()` both said "this
+  machine has no Linux runner", and that stopped being true on 2026-10-05: the
+  Dockerfile builds a pinned V from source, runs the suite 45/45 green **with GTK
+  C compiled in**, and `run_headless.sh` runs a real app under Xvfb. Both files,
+  and the ROADMAP's `drop` line, now say the gap is the code and not the ability
+  to prove it — recorded rather than left inherited, because a stale reason reads
+  as a blocker and the next person does not start. The support note still says
+  `unwritten` rather than `unsupported`, because those are different claims.
+
 - **The Dockerfile's V layer was five days stale, and that is why the json2 bug
   "came back" on Linux.** The layer cloned whatever master pointed at on the day
   it was first built and then never rebuilt, because a cached layer is content-
