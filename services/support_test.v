@@ -60,11 +60,19 @@ fn test_support_matches_the_dispatch_branch() {
 		assert opener_support().ready
 		assert dialog_support().ready
 	} $else $if linux {
-		// clipboard and opener got real backends in wave 2; dialog is still
-		// the GTK stub and notification has no backend at all
+		// clipboard and opener got real backends in wave 2, and dialog's GTK
+		// backend landed with Phase 5b (ADR-0027). This branch used to assert
+		// `!dialog_support().ready`, with a comment calling dialog "still the
+		// GTK stub", because dialog_support() itself said so - and both were
+		// stale. The note is asserted rather than the stub string, so the
+		// stub cannot come back without a red test: `doctor` reporting
+		// `stub dialog` on a machine with a real chooser is the over-read
+		// AGENTS.md 5 exists to prevent.
 		assert clipboard_support().ready
 		assert opener_support().ready
-		assert !dialog_support().ready
+		assert dialog_support().ready
+		assert !dialog_support().note.contains('stub')
+		assert dialog_support().note.contains('GtkFileChooserDialog')
 		assert !notification_support().ready
 		assert !is_supported()
 	} $else {

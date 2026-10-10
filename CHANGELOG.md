@@ -20,6 +20,38 @@ Conventions for this file:
 
 ### Changed
 
+- **The Dockerfile's V layer was five days stale, and that is why the json2 bug
+  "came back" on Linux.** The layer cloned whatever master pointed at on the day
+  it was first built and then never rebuilt, because a cached layer is content-
+  addressed: every later `docker build` reused a V from 2026-10-05 while the host
+  moved on. Measured 2026-10-10: the image carried V `e5ab344` while the Windows
+  host ran `ef2ec06`. The stale V still had the `config` + `net.http` zero-decode
+  defect (AGENTS.md §1b), so in the container `vails doctor` reported
+  `vails.json : INVALID` **on a suite that was 45/45 green**, while the same
+  command on the host reported `ok`. Nothing in the test output could tell the
+  two compilers apart, which is the whole danger: the cache chooses which
+  compiler you are testing against and does not announce it. V is now pinned to a
+  commit, fetched by full sha (a short sha is refused by GitHub), with the
+  measured failure and the bump procedure in the Dockerfile. Pinning also gives
+  this file the property its own header argues for in point 3 and had left
+  unapplied to V — an unpinned ref can change under a fixed name, which makes a
+  green run meaningless.
+- **`vails doctor` stopped lying about the Linux dialog, and the test that kept
+  it quiet is fixed too.** `dialog_support()` answered `stub: the GTK chooser
+  lands in Phase 5b` on Linux for two releases after Phase 5b landed the real
+  backend (ADR-0027) — so `doctor` said `stub dialog`, `5/9 backends native`, on
+  a machine with `GtkFileChooserDialog` compiled in and its response mapping
+  tested. `services/support_test.v:67` was pinning the opposite assertion, with a
+  comment saying dialog "is still the GTK stub", so the stale line was green the
+  whole time. That is the §2c failure at service scale: a test that asserts
+  something false. Both are fixed, and the new assertions pin the *content* of the
+  note — `ready` and `GtkFileChooserDialog` present, `stub` absent — so the stub
+  cannot come back without a red test. Linux `doctor` now reports
+  `6/9 backends native, ok dialog - GtkFileChooserDialog + GtkMessageDialog`.
+  Seen red by planting the stub string back on Linux
+  (`assert dialog_support().ready` failed), then green on restore — which is also
+  the first time the container has been used to turn a Windows-only check red.
+
 - **The `json2` zero-decode bug no longer reproduces, and the three `.d.ts` are
   regenerated.** The compiler moved from `bb0d229` to `ef2ec06` while this branch
   was open and the bug stopped reproducing — verified across three fresh project

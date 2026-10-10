@@ -76,9 +76,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       net-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# V from source, as a cached layer (see the header).
+# V from source, as a cached layer (see point 2 in the header).
+#
+# **The commit is pinned, and this is a fix for a measured failure rather than
+# tidiness.** This line used to clone whatever master pointed at on the day the
+# layer was *first* built, and then never rebuild: a cached layer is content-
+# addressed, so every later build reused a V from that day while the host moved
+# on. Measured on 2026-10-10, the image carried V `e5ab344` (five days stale,
+# master was `60542b9`) while the Windows host ran `ef2ec06`.
+#
+# The consequence was concrete, and invisible from the test output: the stale V
+# still had a `json2` defect the host's had fixed (AGENTS.md §1b — a module named
+# `config` plus `net.http` in one binary decodes to a zero struct with no error).
+# So in this container `vails doctor` reported `vails.json : INVALID` on a project
+# whose config is valid, on a suite that was **45/45 green**. The same program
+# decoded correctly on the host. Nothing in the test output could tell the two
+# compilers apart, which is what makes a cached toolchain dangerous: the cache
+# decides which compiler you are testing against, and it does not announce it.
+#
+# Pinning also gives this file the property it argues for in point 3 above: an
+# unpinned ref can change its contents under a fixed name, which makes a green
+# run meaningless. That argument was made for the base image and left unapplied
+# to V, which is the thing that actually decides the test results.
+#
+# **Bump V_SHA deliberately.** Fetching by full sha works on GitHub for any
+# reachable commit; a *short* sha is refused ("couldn't find remote ref").
+# Verify against the current master (`gh api repos/vlang/v/commits/master`)
+# before bumping, and re-run the container's `vails doctor` after, because the
+# failure mode above is silent.
+ARG V_SHA=ef2ec067e09e006f6427ccdfb871fe6eea572823
 WORKDIR /opt/vlang
-RUN git clone --depth 1 https://github.com/vlang/v.git . \
+RUN git init -q . \
+    && git remote add origin https://github.com/vlang/v.git \
+    && git fetch --depth 1 origin $V_SHA \
+    && git checkout -q FETCH_HEAD \
     && make \
     && ./v version
 
