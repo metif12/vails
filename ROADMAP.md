@@ -16,7 +16,7 @@ an ADR, not here.
 | `v test .` on Linux | **45/45 test files green** — measured 2026-10-05 in the CI container, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. |
 | Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
 | Next by the table | **the Linux suite is green** (below). Next: F1, then W1–W4 |
-| **Build-blocked on** | **`vails.json` cannot be loaded by the built CLI** - a V master bug, not a Vails bug. Found 2026-10-05, not yet filed upstream. See below. |
+| **Build-blocked on** | *nothing. The `vails.json` blocker that sat here on 2026-10-05 was a V master bug and stopped reproducing once V moved to `ef2ec06`; AGENTS.md §1b records the whole thing, including why the guard stays.* |
 | Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
 
 **THE CLI CANNOT READ `vails.json`, AND `v test .` CANNOT SEE IT.** Found
@@ -57,16 +57,16 @@ Three things worth remembering about it:
   `_test.v` is its own binary and **no test file imports both `dev` and
   `config`**. Same lesson as `workflow_test.v` and `bom_test.v`, one level up:
   the suite is green and the property it appears to cover is exercised nowhere.
-- **It is upstream.** `json2` was three days old on `vlang/v` master
-  (2026-10-03) and this needs an unusual combination to bite, so the fix is a V
-  bug report, not a Vails patch. Filed as [vlang/v#29508](https://github.com/vlang/v/issues/29508),
-  with the module-name sweep as the evidence. Note that master has already moved
-  past the compiler this was measured on (`bb0d229` → `3c5f448`) and none of the
-  five intervening commits touch `vlib/json2`, so the report asks for
-  re-confirmation rather than claiming current-master breakage. The workaround
-  that would unblock the CLI is to keep `net.http` out of the binary that reads
-  config, which means `vails run` spawning a separate helper process — a real
-  restructure, not done.
+- **It is upstream, and it is gone.** `json2` was three days old on `vlang/v`
+  master when this bit. Filed as
+  [vlang/v#29508](https://github.com/vlang/v/issues/29508) with the module-name
+  sweep as the evidence; **closed as fixed**, because on 2026-10-10 the same
+  program on V master `ef2ec06` decoded correctly and `vails doctor` reported
+  `vails.json : ok` again. Nine `json2` commits landed between the two builds
+  and **which one fixed it was never bisected**, so do not attribute it. The
+  guard in `buildplan/json2_import_test.v` stays regardless, because it is
+  about this repository's test layout: it makes the next one visible at review
+  time rather than at `vails doctor` time.
 
 **CI NOW RUNS JOBS.** On 2026-10-05 this stopped being a claim. Two distinct
 causes had been producing the identical "0s, zero jobs" symptom, and only the

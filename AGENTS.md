@@ -165,29 +165,35 @@ main.v  ->  import json2 / import os / import net.http / import config
 data.json  ->  {"name": "vails", "n": 3}
 ```
 
-A lead on the cause, recorded because it is cheap and offered as a **hypothesis,
-not a diagnosis**: the failing and passing builds both emit
+**Two explanations for it were offered and then killed, and the kills matter more
+than the shot in the dark they replaced.**
 
-```c
-config__Cfg result = (config__Cfg){.name = _str_36};
-```
+*Lead 1 — "the `_str_N` literals collide."* Both failing and passing builds emit
+`config__Cfg result = (config__Cfg){.name = _str_36};`, but at that index the
+failing build defines `{"", 0, 1}` and the passing one a long unrelated
+`array.ensure_noscan` message. It reads like a numbering collision. **It is
+not.** Two programs that differ only by an unused `import sync` — both decoding
+correctly — disagree on **507 of 2160 identical-index literals**, and the
+statement in question is a *zero-initialisation*: both builds seed `name` with
+the empty string at the index each string table happens to give it, which is
+correct and internally consistent. So `_str_N` divergence is the normal state
+between any two programs with different module sets and cannot be the cause.
 
-but define `_str_36` differently — `{"", 0, 1}` in the failing build, a long
-unrelated `array.ensure_noscan` message in the passing one. So the same
-`_str_N` index names different literals in the two programs, which is consistent
-with a collision or a numbering computed over a differing module set. Nobody has
-diffed the symbol tables yet.
+*Lead 2 — "a module named `cfg` is special too."* It looks special: it fails to
+build where every other name built. It is not the same bug, and it is not a
+compiler quirk. `error: duplicate of an import symbol 'cfg'` — a module named
+`cfg` collides with a *variable* named `cfg`, because the struct is `Cfg` and a
+local called `cfg` is the natural thing to write. The control is decisive: a
+module named `zzz` with a variable `zzz` fails identically, and module `cfg`
+with a variable renamed decodes fine. So this was the harness, not V.
 
-Also unchased, and deliberately not claimed: a module named **`cfg`** failed to
-build three times in a row in the same harness where every other name built.
-
-**Consequence for this repository: the `vails` CLI cannot read `vails.json`.**
-`vails doctor`, `vails run`, `vails build` and `vails dts` all report
-`vails.json: name must not be empty` on a perfectly valid project. `dev/dev.v`
-and `dev/serve.v` are the only `net.http` importers, `cli` imports `dev` for
-`vails run`'s dev server, and this repository's config module is named `config`
-— so all three conditions are met by construction, and that one import is the
-whole exposure.
+**Consequence for this repository, and note that it no longer applies:** the
+`vails` CLI could not read `vails.json`. `vails doctor`, `vails run`,
+`vails build` and `vails dts` all reported `vails.json: name must not be empty`
+on a perfectly valid project. `dev/dev.v` and `dev/serve.v` are the only
+`net.http` importers, `cli` imports `dev` for `vails run`'s dev server, and this
+repository's config module is named `config` — so all three conditions were met
+by construction, and that one import was the whole exposure.
 
 **Why `v test .` is 45/45 green and still cannot see this:** every `_test.v` file
 is its own binary, and **no test file links `dev` with `config`**
@@ -197,22 +203,42 @@ cannot assert the bug, because a test that reproduces it would only pass while
 the compiler is broken — but no test here can catch a regression in the decode
 itself. This is the §2c lesson at suite scale: a green check that cannot fail.
 
-Practical rules until this is fixed or filed:
+**It no longer reproduces. Re-measured 2026-10-10 on V master `ef2ec06`** — the
+same program, three fresh project roots, prints `vails` correctly every time, and
+`vails doctor` in `examples/dialog` reports `vails.json : ok`. So the trigger
+above is a description of a compiler state, not of the compiler. Nine `json2`
+commits landed between the two builds, among them `json2: cache compact ASCII
+struct keys (#29701)` and `json2: skip unused key tracking for structs without
+embeds (#29656)`; **which one fixed it is not bisected**, so do not attribute it.
 
-- Do not trust `config.load` (or any `json2.decode` in a module named `config`)
-  in a binary that also links `net.http`. `vails doctor` reaching
-  `vails.json : INVALID` is this bug, not a bad config.
-- The check that matters is whether **the decoding module is named `config`**
-  and **its binary links `net.http`**. Neither condition alone does anything.
-- Anything that must read `vails.json` outside a test belongs in a module that
-  does not import `dev`.
-- The checked-in `examples/*/frontend/vails.d.ts` files cannot be regenerated
-  with `vails dts` for this reason; they were last generated before the move to
-  master and say so in their header ("do not edit").
+What survives, because it is about this repository and not about V:
 
-Upstream: [vlang/v#29508](https://github.com/vlang/v/issues/29508). Note that
-master has moved past the compiler this was measured on (`bb0d229` → `3c5f448`)
-and the fix is not ours to make.
+- The `vails` CLI reads `vails.json` again, and the three
+  `examples/*/frontend/vails.d.ts` files were regenerated on 2026-10-10 and now
+  carry the blocking-command JSDoc. Their headers still say "do not edit",
+  which is a rule about not hand-editing, not about not regenerating.
+- `buildplan/json2_import_test.v` stays. It asserts that `net.http` keeps one
+  importer, that this importer and every `json2.decode` instantiator stay
+  **disjoint**, and that `cli` is where the two meet — which is exactly the
+  shape that made the bug reachable here. A regression in V would make that
+  workbook again, and the guard is what makes the next one visible at review
+  time instead of at `vails doctor` time.
+- The general lesson is the one that generalises: **the suite was 45/45 green
+  while a shipped command was broken**, because no test binary linked `dev`
+  with `config`. That is not a V bug, it is a property of this repo's test
+  layout, and it is still true.
+
+Upstream: [vlang/v#29508](https://github.com/vlang/v/issues/29508). A V
+maintainer closed it **`completed` on 2026-10-05**, before the non-reproduction
+above was measured, so the fix is confirmed at the source and not merely
+inferred here. The report was updated on 2026-10-10 with the non-reproduction,
+the two retracted claims, and the candidate commits — with the retractions at
+the top rather than buried, because the first version of that report is what a
+maintainer's afternoon would have gone on.
+
+The compiler that **did** reproduce was `bb0d229` (measured 2026-10-05), which
+no longer exists as a binary on this machine. Master has since moved to
+`3c5f448` and then `ef2ec06`.
 
 #### Two history worth keeping, because both cost an afternoon
 
