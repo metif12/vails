@@ -16,6 +16,14 @@ fn test_linux_app_builds_with_gc_none() {
 fn test_windows_app_needs_only_cc_gcc() {
 	// The README asserts an app needs no flags beyond `-cc gcc`; if that
 	// ever stops being true this test is where it should be noticed.
+	//
+	// This exact equality is also the guard that caught `app_flags` reading the
+	// HOST os instead of its `target` argument (2026-10-05, on the first Linux CI
+	// run): with the branch wrapped in `$if windows` the function returned `[]`
+	// here on Linux, and an assertion like `f.contains('-cc')` would have passed
+	// on Windows while checking nothing on Linux. Do not loosen this to `.contains`
+	// or `.all` — the equality is what makes it a host-independence check, and it
+	// now runs, and bites, on both platforms.
 	f := app_flags(.windows)
 	assert f == ['-cc', 'gcc']
 }

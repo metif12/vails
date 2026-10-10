@@ -114,21 +114,33 @@ pub fn needs_gc_none(target Target) bool {
 // nothing from the compiler that is not already in the module tree. That
 // claim is asserted in `tests/e2e_windows/README.md:41` and is why the
 // two recipes differ.
+//
+// **It is a pure function of `target`, and that used to be false.** The `-cc gcc`
+// branch was wrapped in `$if windows`, which made `app_flags(.windows)` return
+// `[]` when it ran on Linux - so a Windows plan could only ever be checked on a
+// Windows machine, which is the exact half-checking `Target` exists to prevent.
+// The Linux CI run is what found it (2026-10-05), and it was found by the test
+// that was written to catch precisely this.
+//
+// The `$if` was never load-bearing: the only production caller is
+// `recipe(target_for_host(), ...)` (cli/vails.v), which always passes the host's
+// own target, so `target == .windows` was already true whenever the `$if` was.
+// Removing it changed no real build and made the function honest. `cli_flags`
+// below adds its Windows flags with no `$if` at all and always did, which is the
+// comparison that made the outlier obvious.
 pub fn app_flags(target Target) []string {
 	mut out := []string{}
 	if needs_gc_none(target) {
 		out << '-gc'
 		out << 'none'
 	}
-	$if windows {
-		if target == .windows {
-			// `-cc gcc` is two argv entries on purpose: `v` takes them
-			// as separate words, and joining them into one flag with a
-			// space is what `quote_if_needed` exists to handle for the
-			// hand-assembled case, not for this list.
-			out << '-cc'
-			out << 'gcc'
-		}
+	if target == .windows {
+		// `-cc gcc` is two argv entries on purpose: `v` takes them
+		// as separate words, and joining them into one flag with a
+		// space is what `quote_if_needed` exists to handle for the
+		// hand-assembled case, not for this list.
+		out << '-cc'
+		out << 'gcc'
 	}
 	return out
 }

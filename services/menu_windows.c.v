@@ -214,6 +214,28 @@ fn set_menu_native(mut st &MenuState, items []MenuItem) ! {
 	// Set BEFORE the bar goes on the window, so a WM_COMMAND cannot arrive
 	// before the table that decodes it exists.
 	st.bar_ids = b.ids
+	// Hook BEFORE the bar, so a seam that cannot be installed leaves the window
+	// untouched. This is the order `drop_windows.c.v` argues for at length and
+	// the reverse of what was here: SetMenu used to run first and the hook
+	// second, so propagating the attach failure (which it now does) would have
+	// reported an error *and* left a visible bar that swallows every click.
+	// Arm-then-hook is only safe while the failure is swallowed, which is the
+	// bug; once the failure propagates, the seam has to come first.
+	//
+	// `or` rather than `!` so the HMENU is released on the way out: CreateMenu
+	// already succeeded and nothing owns this handle — it was never handed to
+	// SetMenu — so bailing with `!` would leak one menu per failed attach, which
+	// is the same class of leak drop_windows.c.v refuses for HDROP.
+	//
+	// Replacing a bar cannot fail here: the hook is already installed, so
+	// attach_bar_hook returns immediately and the id table above is simply
+	// swapped underneath it.
+	attach_bar_hook(mut st) or {
+		unsafe {
+			C.DestroyMenu(root)
+		}
+		return err
+	}
 	previous := unsafe { C.SetMenu(st.ctx.parent, root) }
 	if previous != unsafe { nil } {
 		unsafe {
@@ -226,42 +248,56 @@ fn set_menu_native(mut st &MenuState, items []MenuItem) ! {
 		C.DrawMenuBar(st.ctx.parent)
 	}
 	st.bar_handle = root
-	attach_bar_hook(mut st)
 }
 
 // drop_bar_hook removes the seam installed for the bar. Called when the bar
 // goes away, because a hook with nothing to decode ids for would classify every
 // WM_COMMAND as "not ours" forever — harmless but no longer the reason it exists.
+//
+// Clear the field BEFORE detaching, which is tray's ordering and the one adopted
+// here. If removal could re-enter (a message already in flight, say) it then
+// finds nothing to detach a second time, which is the outcome you want; the
+// reverse order leaves a window in which a second detach is reachable.
+//
+// The nil guard is load-bearing and cannot be moved into webview.detach: V 0.5.2
+// faults on handing a nil *variable* to a `mut &T` parameter, before the callee
+// runs at all (AGENTS.md §2c). See that function's doc comment.
 fn drop_bar_hook(mut st &MenuState) {
 	if st.bar_hook == unsafe { nil } {
 		return
 	}
-	webview.detach(mut st.bar_hook)
+	mut hook := st.bar_hook
 	st.bar_hook = unsafe { nil }
+	webview.detach(mut hook)
 }
 
-// attach_bar_hook installs the window seam for the bar's WM_COMMAND, unless it
-// is already installed (replacing the bar's items must not stack hooks).
+// attach_bar_hook installs the window seam for the bar's WM_COMMAND, unless it is
+// already installed (replacing the bar's items must not stack hooks).
 //
-// `owner` rather than `st` in the capture: V 0.5.2 types a closure capture of a
-// `mut` pointer *parameter* as a pointer to the pointer and the generated C
-// assignment is rejected by gcc. Same workaround as tray_backend, same reason.
-fn attach_bar_hook(mut st &MenuState) {
+// `owner` rather than `st` in the capture: see webview.attach's "One
+// caller-side rule", which is the one copy of that V 0.5.2 rule.
+//
+// **It returns the failure rather than logging it**, which it used to do. The
+// earlier version caught the attach error, wrote it to stderr with `eprintln` and
+// returned normally — so `menu.set_menu` resolved `ok` on a window whose bar was
+// attached but had nothing listening, and the user clicked a dead menu bar with
+// no error anywhere. That is the opposite of what a comment three lines above it
+// claimed to be preventing ("the whole command fails: the caller learns, and
+// the frontend can fall back"), and it was inconsistent with `tray` and `drop`,
+// which both propagate the identical failure from the identical `webview.attach`
+// call. A command that cannot do its job must say so; AGENTS.md §2 puts failures
+// in the return value, not on stderr.
+fn attach_bar_hook(mut st &MenuState) ! {
 	if st.bar_hook != unsafe { nil } {
 		return
 	}
 	owner := st
-	hook := webview.attach(st.ctx, fn [owner] (e webview.HostEvent) !bool {
+	st.bar_hook = webview.attach(st.ctx, fn [owner] (e webview.HostEvent) !bool {
 		return on_bar_command(owner, e)!
 	}) or {
-		// A bar with no hook is a bar the user can click and nothing will
-		// happen, which is worse than no bar at all, so the whole command
-		// fails: the caller learns, and the frontend can fall back.
-		eprintln('menu.set_menu: could not hook the window for menu commands: ' +
-			err.msg())
-		return
+		return error('menu.set_menu: could not hook the window for menu ' +
+			'commands: ' + err.msg())
 	}
-	st.bar_hook = hook
 }
 
 // on_bar_command is the handler for the bar's seam. It consumes a WM_COMMAND

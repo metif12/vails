@@ -1,7 +1,9 @@
 # ADR-0038 — the Windows toolchain becomes a resolved root, and MSVC stops at the webview boundary
 
 Date: 2026-10-03. Status: **accepted; the resolver is written, the `#flag` half is
-blocked and named.**
+blocked and named.** *(2026-10-10: the resolver now has a production caller — see
+the implementation note at the end of this file. The `#flag` half is still not
+written.)*
 
 ## Context
 
@@ -135,3 +137,46 @@ part that needs no compiler trick: the resolver.
   was left unwritten rather than written blind: a generated-header mechanism that
   has never been through a compiler is exactly the "GTK C nobody has run" mistake
   ADR-0015 exists to prevent.
+
+## Implementation note, 2026-10-10
+
+The resolver has a production caller now, so this ADR's status moves one notch and
+the record should say which notch. The Changes are additive and in the order the
+Consequences listed them.
+
+**`vails doctor` uses `buildplan.resolve_toolchain()`** instead of asserting
+`C:/msys64/ucrt64/include/webview/webview.h`. The `webview` line checked a literal,
+so a machine with a relocated or scoped toolchain was told about the one root that
+cannot be the answer — and, worse, an explicitly *set* `VAILS_TOOLCHAIN` pointing at
+an existing directory would still be reported as the default root, because the
+literal never changed. Now the header is looked up under the resolved root, and the
+missing pieces (`webview.h`, `libwebview.dll.a`, the `bin` directory holding the
+five side-by-side DLLs) are listed together rather than surfacing one at a time
+**three minutes into a build**, which is the failure mode ADR-0035's own COM
+apartment story is about.
+
+Measured, because the claim above is only worth as much as its evidence:
+
+- an unset `VAILS_TOOLCHAIN` prints the **byte-identical** header path as before,
+  because the default *is* that root — so this is not a behaviour change on a
+  healthy machine;
+- with `VAILS_TOOLCHAIN` pointed at `D:/does/not/exist`, `doctor` prints
+  `toolchain : D:/does/not/exist (from VAILS_TOOLCHAIN)` and three specific
+  missing-piece notices, where the old code printed
+  `webview : header found (C:/msys64/ucrt64/…)`.
+- the `side-by-side` DLL line **deliberately still uses `buildplan.ucrt64_bin`**,
+  whose own comment records that it matches the webview backend's `#flag -I/-L`.
+  Following the variable there would stage DLLs from one toolchain next to a binary
+  built against another, which is the exact mismatch `ucrt64_bin` warns about.
+
+**Still not done, and this note is not a claim that it is:** the `#flag` half. The
+generated-header mechanism described above has never been compiled here, and the
+Verification section's "not compiled" line below it is still true of that half.
+`webview_windows.c.v` keeps its literal `-I`/`-L`, so a *scoped* toolchain still
+cannot be used to build a GUI target without the resolved root happening to be the
+MSYS2 default.
+
+One editorial correction to this ADR's own Context: it says `cli/vails.v` is one of
+four places that hard-code the path. After this change it is no longer one of them,
+so the count is **three**, and this paragraph is that correction rather than a
+rewrite of the table above.

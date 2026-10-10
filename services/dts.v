@@ -31,6 +31,22 @@ pub fn (s Service) specs() []generator.MethodSpec {
 // function per command. The names are the short ones the per-service JS
 // snippet installs on window.vails, so a frontend type-checks the same
 // shape it calls at runtime.
+//
+// **A blocking command carries a JSDoc marker above its declaration**, and
+// that is the whole point of the `blocking` field reaching this function at
+// all. ADR-0014 says the flag exists "so the constraint is visible in the
+// service description, not only in prose" — and until now it was in neither:
+// `dts` emitted a bare signature, so the generated `.d.ts` a frontend
+// type-checks against was byte-identical whether a command froze the UI or
+// not. A frontend author had to go and read ADR-0014 to learn that
+// `dialog.open` blocks until the user answers, and nothing in their editor
+// would have told them.
+//
+// A JSDoc comment rather than a change to the signature, because the flag is
+// documentation and not part of the type: `dialog.open` takes the same
+// arguments and returns the same `Promise` whether it blocks or not, and
+// inventing a wrapper type to encode "blocks the UI" would be a lie about the
+// runtime shape.
 pub fn dts(svcs []Service) string {
 	mut out := ''
 	for s in svcs {
@@ -41,12 +57,26 @@ pub fn dts(svcs []Service) string {
 		out += '\texport const service: string;\n'
 		out += '\texport const version: string;\n'
 		for c in s.commands {
+			if c.blocking {
+				out += '\t/** ' + blocking_note(c) + ' */\n'
+			}
 			out += '\texport function ' + c.short_name() + '(params: ' +
 				params_type(c) + '): Promise<' + c.result + '>;\n'
 		}
 		out += '}\n'
 	}
 	return out
+}
+
+// blocking_note is the one-line warning a frontend author reads at the call
+// site. It says what the call does and what the constraint is, because "this
+// blocks" alone reads as a performance note rather than as "do not put this on
+// a path that must stay responsive".
+fn blocking_note(c Command) string {
+	return c.short_name() + ' blocks the UI until it is answered (a native ' +
+		'modal). Do not call it from a loop or a startup path; it is the ' +
+		'documented exception to the "handlers must be fast" threading rule ' +
+		'(ADR-0014).'
 }
 
 // params_type is the .d.ts parameter type of one command: `undefined`

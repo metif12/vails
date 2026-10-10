@@ -7,16 +7,66 @@ current position, then what has shipped, then the priority table that decides
 what happens next. Anything about *why* something took three attempts belongs in
 an ADR, not here.
 
-## Where we are (2026-10-04)
+## Where we are (2026-10-10)
 
 | | |
 |---|---|
-| `v test .` on Windows | **37/37 test files green**, excluding `webview` (below). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. Re-measured 2026-10-04 across all 16 non-webview modules. |
-| `v test webview` on Windows | **cannot be run**: it takes the host down. Measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with **no OOM in the Windows event log**. All six `webview` test files *compile* (`v -o`, no run). |
-| `v test .` on Linux | **20 of 43 test files FAIL** — measured 2026-10-05 in the CI container, the first time this has ever been run. `webview` (6 files) **compiles and runs** here, which is the coverage Windows cannot give, and it finds 7 distinct errors in `webview_linux.c.v`. `services/drop.v:257` calls `read_dropped_paths_native`, which exists only on Windows, so the module does not compile at all. `buildplan_test.v` expects `-cc gcc` in the app flags and Linux does not emit it. |
+| `v test .` on Windows | **45/45 test files green, `webview` included** — measured 2026-10-05. The claim in the row below turned out to be stale. No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. |
+| `v test webview` on Windows | **green as of 2026-10-05** — all six `webview` files compile *and* run, twice, inside a full `v -cc gcc test .` (45/45). This contradicts the measurement recorded here until today: **"cannot be run: it takes the host down"**, measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with no OOM in the Windows event log. **What changed is not known**: the tests needed no editing to pass, and the compiler is the same 0.5.2 master as both earlier measurements. So treat this as *currently green*, not *fixed* — if it starts taking the host down again, this row is the history and the F0 work since 2026-10-03 is the first thing to suspect. |
+| `v test .` on Linux | **45/45 test files green** — measured 2026-10-05 in the CI container, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. |
 | Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
-| Next by the table | **CI runs now** (below). Next: the 20 Linux failures, then F1, then W1–W4 |
+| Next by the table | **the Linux suite is green** (below) and F1 has landed (ADR-0036), so the next unwritten row is **W1–W4** — frameless window chrome plus a `window` service, 6 d. Note what W1–W4 needs: native C interop on two platforms and a human to drag a window edge, so it is not a session of work |
+| **Build-blocked on** | *nothing. The `vails.json` blocker that sat here on 2026-10-05 was a V master bug and stopped reproducing once V moved to `ef2ec06`; AGENTS.md §1b records the whole thing, including why the guard stays.* |
 | Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
+
+**THE CLI CANNOT READ `vails.json`, AND `v test .` CANNOT SEE IT.** Found
+2026-10-05 while trying to regenerate the examples' `.d.ts` files, which had
+been quietly impossible since the move to V master. Every config-consuming
+command fails on a perfectly valid project:
+
+```
+vails doctor   ->   vails.json : INVALID (vails.json: name must not be empty)
+```
+
+`vails doctor`, `vails run`, `vails build` and `vails dts` are all
+affected, so this is not one command's bug: it is the dev server's `import dev`
+(which pulls in `net.http`) poisoning `json2.decode` for the whole binary. The
+full bisection table and a two-import minimal reproduction are in **AGENTS.md
+§1b**.
+
+**The trigger is two specific conditions, and two earlier versions of this note
+were wrong about it.** "`json2` + `net.http`" is not enough — decoding a 2-field
+struct with `net.http` works, and so does decoding a struct that is a
+field-for-field copy of `VailsConfig`. What breaks is a decode of a type declared
+in a module named **`config`**, in a binary that links `net.http`. Two controls
+pin it: removing `net.http` makes it pass, and renaming the module to `other`
+makes it pass. `conf`, `configx` and `xconfig` all work, so it is the exact
+identifier rather than a prefix rule. `time` and `sync` do not trigger it;
+`net.http` does, and merely being *linked* is enough even unused.
+
+Three things worth remembering about it:
+
+- **It returns a zero-valued struct and no error.** So the complaint is about a
+  field that was never read ("name must not be empty"), which sends you looking
+  at the config file instead of at the decoder. Every config in this repo is
+  valid — verified by reading them, not assumed. The primitive is `json2.decode`
+  itself: a direct `json2.decode[config.VailsConfig]` in a binary with
+  `net.http` returns an empty name with no error at all, which is worse than
+  the CLI symptom, because nothing downstream is in a position to catch it.
+- **`v test .` is 45/45 green and structurally cannot catch it**, because each
+  `_test.v` is its own binary and **no test file imports both `dev` and
+  `config`**. Same lesson as `workflow_test.v` and `bom_test.v`, one level up:
+  the suite is green and the property it appears to cover is exercised nowhere.
+- **It is upstream, and it is gone.** `json2` was three days old on `vlang/v`
+  master when this bit. Filed as
+  [vlang/v#29508](https://github.com/vlang/v/issues/29508) with the module-name
+  sweep as the evidence; **closed as fixed**, because on 2026-10-10 the same
+  program on V master `ef2ec06` decoded correctly and `vails doctor` reported
+  `vails.json : ok` again. Nine `json2` commits landed between the two builds
+  and **which one fixed it was never bisected**, so do not attribute it. The
+  guard in `buildplan/json2_import_test.v` stays regardless, because it is
+  about this repository's test layout: it makes the next one visible at review
+  time rather than at `vails doctor` time.
 
 **CI NOW RUNS JOBS.** On 2026-10-05 this stopped being a claim. Two distinct
 causes had been producing the identical "0s, zero jobs" symptom, and only the
@@ -76,14 +126,28 @@ compiler that provably cannot build this repo, and says so in one named line
 instead of failing obscurely two steps later.** That is the smoke step working
 as designed, on a machine nobody had ever run it on.
 
-**Which means the Linux backlog is now visible, and it is large.** 20 failing
-files is not a list of flaky tests: `webview/webview_linux.c.v` has seven
-distinct compile errors (two undeclared C functions, a `string`/`&char`
-mismatch, four `mut` errors), `services/drop.v` references a Windows-only
-function from platform-neutral code so the whole module fails, and
-`buildplan_test.v` asserts a flag shape Linux does not produce. Every one of
-these was shipped with the Linux side marked "stale, treat as was-green", and
-stale was the correct word: nobody had run it.
+**And the Linux backlog that became visible is now closed: 44 of 44 green.** It
+began as 20 failing files, which is not a list of flaky tests but three distinct
+compilation defects, all shipped with the Linux side marked "stale, treat as
+was-green": `webview/webview_linux.c.v` had seven compile errors (two undeclared
+C functions, a `string`/`&char` mismatch, four `mut` errors), `services/drop.v`
+referenced a Windows-only function from platform-neutral code so the *whole*
+module failed, and `buildplan_test.v` asserted a flag shape Linux does not
+produce. Stale was the correct word for all three: nobody had run it.
+
+The fix is only interesting because of what it turned up on the way. The third one
+was not a bad assertion — it was `app_flags` reading the **host** OS instead of
+its `target` argument, so a Windows build plan could only ever be checked on a
+Windows machine. That is the exact half-checking that taking `Target` as a
+parameter exists to prevent, and the test written to catch it had been passing on
+Windows the whole time, because on Windows it cannot fail. **A platform-specific
+green is not a green**; it is a check that has never been exercised. The other
+two are the ordinary lesson repeated: the Linux backend was never compiled
+because only Windows ever compiled it.
+
+The lasting gain is coverage, not just colour: **the six `webview` test files run
+on Linux**, which Windows cannot do at all (there they take the host down), so
+`webview` now has the one platform where its tests are actually executed.
 
 **F0 is proven on Windows.** `examples/multiwindow` with
 `VAILS_MULTIWINDOW_PROBE=pings` brings up two windows, each showing its own label
@@ -127,19 +191,21 @@ code in this repo should read §2c before it is written.
 The repo's own rule (AGENTS.md §5) is that a line either names a proof or says it
 is unproven. The four things most likely to be over-read:
 
-- **B2+B3 (Dockerfile + CI): the CI has now been RUN once, and it is fixed but
-  still unproven.** The "never executed" claim was true until 2026-10-03, when it
-  was executed on GitHub and reported **"No jobs were run"** — one step had lost
-  its indentation, so the workflow was invalid YAML and GitHub had no jobs to
-  run. Fixed, and `buildplan/workflow_test.v` now guards it (the guard was
-  confirmed **red on the broken file and green on the fixed one**, which is the
-  only way to know a guard guards). The runner has still never reported a single
-  green job, so "CI is green" remains a claim nobody can make: the first real run
-  may well stop at the `json2` smoke step, which exists precisely to turn a
-  confusing failure into a named one.
-- **The Linux GUI proofs need a real session.** `menu.png` / `tray.png` /
-  `dialog.png` exist; the Linux `menu:clicked {id}` mapping does not, because Xvfb
-  has no window manager to deliver the click.
+- **B2+B3 (Dockerfile + CI): the Linux job is green and the Windows one is not,
+  and neither of those is the same as "CI is green".** The "never executed" claim
+  was true until 2026-10-03. Since then the Linux container job has **passed
+  repeatedly** (5m36s on the branch in #1, after starting at 20 of 44 test files
+  failing); the Windows job **still fails**, at the step that checks whether the
+  runner's own V can build this repository at all — it installs a *released* V,
+  and no release has `json2`. So the accurate statement is "one of the two jobs is
+  green", and the more useful one is "the Linux suite is now proven on a clean
+  runner", which is something this file could not say before.
+- **The Linux GUI proofs need a real session, and three of the screenshots this
+  file used to cite have never existed.** `git log --all` returns **zero commits**
+  for `tests/e2e_windows/tray.png`, `tests/e2e_windows/menu.png` and
+  `tests/e2e_linux/dialog.png`, yet ADR-0017 and ADR-0027 both cited them as their
+  evidence — the errata on those ADRs record it. The Linux `menu:clicked {id}`
+  mapping does not, because Xvfb has no window manager to deliver the click.
 - **`post_to_main` is Windows-only.** On Linux it refuses by name; the
   `g_idle_add` trampoline is unwritten, and it is the first push onto the GTK
   main loop from a foreign thread in this repo's history.
@@ -166,14 +232,19 @@ is unproven. The four things most likely to be over-read:
   `Windows.winmd` or `UniversalApisContract.winmd`). Flipping that constant is
   the whole remaining work, and guessing a GUID instead would activate the wrong
   object.
-- **F0's second Windows window is written and type-checked, not observed.** The
-  COM apartment that unblocks it is in `webview_windows.c.v` and `v vet webview`
-  is green, but **this machine crashes its host on the `webview` test module** —
-  measured three times on 2026-09-30, with one test file at a time and with the
-  whole directory, and with no OOM in the Windows event log, so the cause is
-  still unknown. Until somebody runs `examples/multiwindow` and puts two windows
-  in a screenshot, "multi-window works" is a claim. Every other module's tests
-  pass: 15 of 16 modules green on 2026-09-30, and `webview` is the sixteenth.
+- **F0's second Windows window is written and type-checked, not observed** — and
+  the *reason* it was not observed has changed shape, so read the next paragraph
+  before repeating it. Until 2026-10-05 this entry said the `webview` test module
+  crashes the Windows host (measured three times on 2026-09-30, one file at a time
+  and as a directory, no OOM in the event log). On 2026-10-05 all six `webview`
+  test files compiled **and ran**, twice, inside a full `v -cc gcc test .` at
+  45/45, on the same 0.5.2 master both measurements were taken against and with
+  no test edited to make them pass. **What changed is not known**, so treat this as
+  *currently green*, not *fixed* — it is recorded as history in the "Where we are"
+  table above, and F0's work since 2026-10-03 is the first thing to suspect if it
+  starts taking the host down again. The reason it is listed here anyway is the
+  part that did not change: nobody has run `examples/multiwindow` and put two
+  windows in a screenshot, so "multi-window works" is still a claim.
 
 ## Corrections worth remembering
 
@@ -210,7 +281,7 @@ Effort is in focused days and is an estimate, not a commitment.
 | 6 | B0 | **B2+B3** Dockerfile + matrix CI | 4 d | P2–P4, B4 | the repo has no CI; `v test .` is green on both platforms already | **done, unproven (ADR-0034)** — no runner or container here |
 | 7 | — | **U0/W0** `post_to_main` | 3 d | U4–U7, W1–W4 | three dependents; also the job half of ADR-0019 (its subscriber half shipped as ADR-0023) | **done on Windows (ADR-0019)** — `jobs.v` + a real E2E screenshot; Linux `g_idle_add` deferred |
 | 8 | — | **F0** multi-window | 6 d | **W**, `tray.set_menu`, U4's second window | highest-leverage single item; reopens an ADR-0020 decision | **done, PROVEN on Windows (ADR-0035, 2026-10-04)** — 21 routing tests + a real two-window run that found two shipped bugs (`webview_dispatch` success read as failure, then an access violation inside the DLL); Linux structurally done, unrun |
-| 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | planned |
+| 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | **done, and the gating question is answered** (ADR-0036, 2026-10-03) - `EnableWebDrop` is **not reachable**: the installed `webview` 0.12 header exposes no `ICoreWebView2Controller`, so the design went to `WM_DROPFILES` on the HWND instead. The observable proof is the outstanding half: nothing has seen a human drag a file |
 | 10 | U0 | **W1–W4** chrome + `window` service | 6 d | the tutorial's menu item, E6 | absorbs S1 wave-4 `window-state`/`positioner` | planned |
 | 11 | W, F0 | **U1–U4** updater core + service | 8 d | U5, P4 | the manifest-as-core half is pure V and no I/O | planned |
 | 12 | B1–B4 | **P0–P4** distribution | 8 d | release | the update-channel policy is decision-only and independent | planned |
@@ -1128,8 +1199,10 @@ a small platform nicety, or a non-goal with a reason attached.
   - **`buildplan/dispatch_test.v` guards both bugs**, textually, because no unit
     test can reach C: no `webview_dispatch` call anywhere in `webview/`, and no
     `if (!C.webview…)` negation of a zero-is-success error code. It lives in
-    `buildplan` rather than `webview` because `v test webview` takes this host
-    down, and a guard nobody can run is the "passes because its subject is
+    `buildplan` rather than `webview` because it was written when
+    `v test webview` took this host down (see "Where we are" — that is **no
+    longer true as of 2026-10-05**, and moving it is now allowed but not
+    required), and a guard nobody can run is the "passes because its subject is
     missing" failure `buildplan/workflow_test.v` already refuses. Verified the
     only way a guard can be trusted: **red** on a reintroduced call, naming the
     file and line, then green.
@@ -1184,11 +1257,16 @@ a small platform nicety, or a non-goal with a reason attached.
   - **Paths, never contents.** A page that wants a file's bytes has to be given
     a way to ask; that capability should be granted on its own rather than
     inherited by every window that can receive a drop.
-  - **Linux is unwritten on purpose** (AGENTS.md §3.4, ADR-0015's lesson: no
-    native code that has never been compiled, and there is no Linux runner
-    here). Everything that is not native is done and tested; the gap is a
-    `GtkDropTarget` and one function. `doctor` says "unwritten", not
-    "unsupported", because only one of those is true.
+  - **Linux is unwritten on purpose** (ADR-0015's lesson: no native code that has
+    never been compiled). Everything that is not native is done and tested; the
+    gap is a `GtkDropTarget` and one function. `doctor` says "unwritten", not
+    "unsupported", because only one of those is true. **The reason for leaving it
+    unwritten has expired**, which is why this line is corrected rather than left:
+    it used to add "and there is no Linux runner here", and on 2026-10-10 that is
+    false — `Dockerfile` builds a pinned V from source and runs the whole suite
+    45/45 green with GTK C compiled in, and `run_headless.sh` runs a real app
+    under Xvfb. So the remaining gap is the code and not the ability to prove it,
+    and `drop_linux.c.v`'s header now says so.
   - **Still unchecked, and for the same reason as F0**: nothing has seen a human
     drag a file, because the Windows GUI proofs go through the `webview` module
     that crashes this host. The outstanding run is the six-step procedure in

@@ -1,13 +1,23 @@
 // drop_linux.c.v - Linux backend of the drop service: **unwritten on purpose**.
 // Compiled on Linux ONLY (V `_linux` suffix rule).
 //
-// The GTK half would be a `GtkDropTarget` on the window, reading
-// `drag-data-received` / `dropped-data` and turning `text/uri-list` into paths.
-// It is not written here, and the reason is the one AGENTS.md §2 asks to be
-// explicit about: **no native code that has never been compiled.** The wave-3
-// Linux build broke for four ordinary GTK reasons while being blamed on V
-// (ADR-0015), and this machine has no Linux runner, so a `GtkDropTarget` written
-// today would be GTK nobody has run.
+// The GTK half is a `GtkDropTarget` on the window, reading `drag-data-received` /
+// `dropped-data` and turning `text/uri-list` into paths.
+//
+// **The reason this file is still empty expired on 2026-10-05, and it is
+// recorded here precisely so nobody keeps inheriting it.** This header used to
+// say "this machine has no Linux runner, so a `GtkDropTarget` written today
+// would be GTK nobody has run" - which was true when written, and is now false:
+// `Dockerfile` builds V from source and runs the **whole suite, 45/45 green,
+// with GTK C compiled in**, and `tests/e2e_linux/run_headless.sh` runs a real app
+// under Xvfb and screenshots it. So the environment that was missing exists, and
+// the remaining gap is the code, not the ability to prove it.
+//
+// What is still true, and is the reason this is a gap rather than a bug: the V
+// in the image is **pinned**, and the pinned commit is the one the Windows host
+// was verified against - see the Dockerfile header for the cache-staleness
+// failure that led to pinning. Write the GtkDropTarget against that toolchain and
+// it is tested on every build, which is the property AGENTS.md 2 asks for.
 //
 // What IS written is everything that is not native: the bounds, the payload, the
 // message policy (services/drop.v), all pure V and all tested on both platforms.

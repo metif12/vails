@@ -37,6 +37,7 @@ export namespace menu {
 	export interface MenuCanceled { canceled: true; }
 	export const service: string;
 	export const version: string;
+	/** popup blocks the UI until it is answered (a native modal). Do not call it from a loop or a startup path; it is the documented exception to the "handlers must be fast" threading rule (ADR-0014). */
 	export function popup(params: MenuPopup): Promise<string>;
 	export function close(params: undefined): Promise<string>;
 	export function set_menu(params: MenuPopup): Promise<string>;
@@ -50,8 +51,11 @@ export namespace dialog {
 	export interface DialogMessageResult { canceled: boolean; paths: string[]; button: string; }
 	export const service: string;
 	export const version: string;
+	/** open blocks the UI until it is answered (a native modal). Do not call it from a loop or a startup path; it is the documented exception to the "handlers must be fast" threading rule (ADR-0014). */
 	export function open(params: DialogOpenOptions): Promise<DialogFileResult>;
+	/** save blocks the UI until it is answered (a native modal). Do not call it from a loop or a startup path; it is the documented exception to the "handlers must be fast" threading rule (ADR-0014). */
 	export function save(params: DialogSaveOptions): Promise<DialogFileResult>;
+	/** message blocks the UI until it is answered (a native modal). Do not call it from a loop or a startup path; it is the documented exception to the "handlers must be fast" threading rule (ADR-0014). */
 	export function message(params: DialogMessageOptions): Promise<DialogMessageResult>;
 }
 export namespace tray {

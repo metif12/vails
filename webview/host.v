@@ -115,6 +115,23 @@ pub fn (h &HostCtx) has_handler() bool {
 // to subclass. A Linux service does not call this — it connects the signal of
 // the GTK object it owns — so the error below names the real reason instead of
 // reporting a missing dependency.
+//
+// ## One caller-side rule, written here once because three call sites needed it
+//
+// V 0.5.2 mis-types a closure capture of a `mut` **pointer parameter** as a
+// pointer to the pointer, and gcc rejects the generated assignment. A plain
+// **local** of the same pointer captures correctly. So a caller holding its
+// state as `mut st &SomeState` must do this:
+//
+// ```v
+// owner := st            // a plain local copy of the pointer
+// hook := attach(st.ctx, fn [owner] (e HostEvent) !bool { … on_msg(owner, e) … })
+// ```
+//
+// and not capture `st` itself. This paragraph is the single copy on purpose:
+// the rule was originally written out in full at all three call sites
+// (`tray`/`menu`/`drop` on Windows), which is three comments that will drift.
+// They now point here.
 pub fn attach(ctx Ctx, on_event HostHandler) !&HostCtx {
 	if !ctx.has_parent() {
 		return error('vails: attach needs the window handle (pass the Ctx from ' +
@@ -137,6 +154,14 @@ pub fn attach(ctx Ctx, on_event HostHandler) !&HostCtx {
 // detach removes the hook and frees the context. Safe on a context that never
 // attached (a Linux service's hook, or a failed attach), because removal is
 // guarded on the handle.
+//
+// **It is NOT safe to call with a nil context**, and there is deliberately no
+// nil check here to make it so — one was tried and removed. A nil check inside
+// the body cannot help, because the crash happens before the body runs: V 0.5.2
+// faults on passing a nil *variable* to a `mut &T` parameter (measured, AGENTS.md
+// §2c), and writing `if host == unsafe { nil } { return }` here would have read
+// as a guarantee while being unreachable in the only way callers actually call
+// it. Callers must guard, which is why `tray`/`menu`/`drop` each still do.
 pub fn detach(mut host &HostCtx) {
 	$if windows {
 		detach_native(mut host)

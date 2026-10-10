@@ -104,19 +104,141 @@ So **no released V can build this repository.** `bridge/` and `state/` import
 `json2`, and a released compiler fails with
 `builder error: cannot import module "json2" (not found)`.
 
-Two consequences, and the first one inverted a decision:
+#### On V master, `json2.decode` silently returns a ZERO struct when a module named `config` shares the binary with `net.http`
 
-1. **The Windows CI job cannot be pinned to a release.** Pinning was the right
-   instinct — every other flag there is justified against a specific V — but the
-   only pin that works is a `vlang/v` *commit*, which means building V from source
-   on the runner. MSYS2 then has to be installed **before** V, because V's own
-   Windows build needs a C compiler. Not done.
-2. **"Install a newer V" is not a complete instruction.** Newer *released* V does
-   not help. What helps is a V built from master.
+Measured 2026-10-05 on master `bb0d229`. **This is the most dangerous item in
+this file**, because it produces *wrong data and no error*: `json2.decode[T]`
+returns a **zero-valued `T`** rather than failing, so whatever validates the
+result complains about a field it never received.
 
-The trap this sits in: a machine with a master checkout builds fine, so the
-dependency looks satisfied locally, and the failure only appears on a fresh
-machine — which is what CI is for.
+**Two earlier versions of this note were wrong, and both corrections matter more
+than the claim.** The first said "`json2` + `net.http` is the broken
+combination"; the second said "the trigger is a cross-module decode". Both were
+generalizations from cells I had not isolated, and both were refuted by cells I
+had built but not varied. The version below is the one that survives its own
+controls.
+
+**The trigger is two conditions together, and both are load-bearing:**
+
+1. the module declaring the decoded type is named **`config`**, and
+2. **`net.http`** is linked into the same binary.
+
+Verified deterministic: 6 builds of the failing program printed an empty name
+every time, with no error and exit 0.
+
+What is *not* the trigger, each row a separate binary with the same two-field
+struct and the same JSON bytes:
+
+| variable varied | values | result |
+|---|---|---|
+| module name (with `net.http`) | **`config`** | **ZERO, no error** |
+| | `other`, `conf`, `configx`, `xconfig`, `mymod` | works |
+| | (`cfg`) | fails to *build* — unchased, see note below |
+| `net.http` (module `config`) | absent | works |
+| | `time`, `sync` instead | works |
+| | **`net.http`** | **ZERO, no error** |
+| struct shape (module `config`) | 2 fields | **ZERO** |
+| | a field-for-field copy of `VailsConfig` | **ZERO** |
+| struct shape (module `other`) | 2 fields, or the same full copy | works |
+
+Two consequences worth internalising:
+
+- **The struct is irrelevant, and the module name is everything.** A copy of the
+  real 6-field `VailsConfig` declared in a module named `other` decodes fine; a
+  2-field struct in a module named `config` does not. So "cross-module" and
+  "struct complexity" were both the wrong axis — the first version of this note
+  was confident about the second one, having never built a minimal struct in a
+  minimal module.
+- **It is `net.http` specifically, not "a second module".** `time` and `sync` in
+  the same binary change nothing. And *linking* is what matters, not *use*: the
+  `net.http` import in the reproduction is unused, V warns about it, and the
+  decode is still wrong.
+
+Minimal reproduction, verified 6/6 — note that a module is a **subdirectory**
+when a `v.mod` is present, which is the second thing my first attempt got wrong:
+
+```
+v.mod  ->  Module { name: 'repro'  dependencies: [] }
+config/config.v  ->  module config ; pub struct Cfg { pub mut: name string  n int }
+main.v  ->  import json2 / import os / import net.http / import config
+            json2.decode[config.Cfg](os.read_file('data.json')!)
+data.json  ->  {"name": "vails", "n": 3}
+```
+
+**Two explanations for it were offered and then killed, and the kills matter more
+than the shot in the dark they replaced.**
+
+*Lead 1 — "the `_str_N` literals collide."* Both failing and passing builds emit
+`config__Cfg result = (config__Cfg){.name = _str_36};`, but at that index the
+failing build defines `{"", 0, 1}` and the passing one a long unrelated
+`array.ensure_noscan` message. It reads like a numbering collision. **It is
+not.** Two programs that differ only by an unused `import sync` — both decoding
+correctly — disagree on **507 of 2160 identical-index literals**, and the
+statement in question is a *zero-initialisation*: both builds seed `name` with
+the empty string at the index each string table happens to give it, which is
+correct and internally consistent. So `_str_N` divergence is the normal state
+between any two programs with different module sets and cannot be the cause.
+
+*Lead 2 — "a module named `cfg` is special too."* It looks special: it fails to
+build where every other name built. It is not the same bug, and it is not a
+compiler quirk. `error: duplicate of an import symbol 'cfg'` — a module named
+`cfg` collides with a *variable* named `cfg`, because the struct is `Cfg` and a
+local called `cfg` is the natural thing to write. The control is decisive: a
+module named `zzz` with a variable `zzz` fails identically, and module `cfg`
+with a variable renamed decodes fine. So this was the harness, not V.
+
+**Consequence for this repository, and note that it no longer applies:** the
+`vails` CLI could not read `vails.json`. `vails doctor`, `vails run`,
+`vails build` and `vails dts` all reported `vails.json: name must not be empty`
+on a perfectly valid project. `dev/dev.v` and `dev/serve.v` are the only
+`net.http` importers, `cli` imports `dev` for `vails run`'s dev server, and this
+repository's config module is named `config` — so all three conditions were met
+by construction, and that one import was the whole exposure.
+
+**Why `v test .` is 45/45 green and still cannot see this:** every `_test.v` file
+is its own binary, and **no test file links `dev` with `config`**
+(`dev_test.v` is `module dev` and imports only `capabilities` and `os`).
+`buildplan/json2_import_test.v` guards the *precondition* textually instead — it
+cannot assert the bug, because a test that reproduces it would only pass while
+the compiler is broken — but no test here can catch a regression in the decode
+itself. This is the §2c lesson at suite scale: a green check that cannot fail.
+
+**It no longer reproduces. Re-measured 2026-10-10 on V master `ef2ec06`** — the
+same program, three fresh project roots, prints `vails` correctly every time, and
+`vails doctor` in `examples/dialog` reports `vails.json : ok`. So the trigger
+above is a description of a compiler state, not of the compiler. Nine `json2`
+commits landed between the two builds, among them `json2: cache compact ASCII
+struct keys (#29701)` and `json2: skip unused key tracking for structs without
+embeds (#29656)`; **which one fixed it is not bisected**, so do not attribute it.
+
+What survives, because it is about this repository and not about V:
+
+- The `vails` CLI reads `vails.json` again, and the three
+  `examples/*/frontend/vails.d.ts` files were regenerated on 2026-10-10 and now
+  carry the blocking-command JSDoc. Their headers still say "do not edit",
+  which is a rule about not hand-editing, not about not regenerating.
+- `buildplan/json2_import_test.v` stays. It asserts that `net.http` keeps one
+  importer, that this importer and every `json2.decode` instantiator stay
+  **disjoint**, and that `cli` is where the two meet — which is exactly the
+  shape that made the bug reachable here. A regression in V would make that
+  workbook again, and the guard is what makes the next one visible at review
+  time instead of at `vails doctor` time.
+- The general lesson is the one that generalises: **the suite was 45/45 green
+  while a shipped command was broken**, because no test binary linked `dev`
+  with `config`. That is not a V bug, it is a property of this repo's test
+  layout, and it is still true.
+
+Upstream: [vlang/v#29508](https://github.com/vlang/v/issues/29508). A V
+maintainer closed it **`completed` on 2026-10-05**, before the non-reproduction
+above was measured, so the fix is confirmed at the source and not merely
+inferred here. The report was updated on 2026-10-10 with the non-reproduction,
+the two retracted claims, and the candidate commits — with the retractions at
+the top rather than buried, because the first version of that report is what a
+maintainer's afternoon would have gone on.
+
+The compiler that **did** reproduce was `bb0d229` (measured 2026-10-05), which
+no longer exists as a binary on this machine. Master has since moved to
+`3c5f448` and then `ef2ec06`.
 
 #### Two history worth keeping, because both cost an afternoon
 
@@ -318,6 +440,36 @@ found something.
   channel, green). The only broken cell is the `mut` reference. The failure
   mode is not consistent — the same construct crashed in one program and hung
   in another — so a hang and a crash here are the same bug.
+
+- **Passing a nil VARIABLE to a `mut &T` parameter is an access violation, and a
+  nil check in the callee cannot prevent it.** Found during the 2026-10-05
+  cleanup, and it is the nastiest of this family because the guard people reach
+  for *compiles, reads as a guarantee, and never runs*:
+
+  ```v
+  fn detach(mut host &HostCtx) {
+      if host == unsafe { nil } { return }   // looks safe
+      ...
+  }
+
+  mut hook := unsafe { nil }
+  detach(mut hook)          // 0xC0000005, and the `if` above never ran
+  ```
+
+  Measured in a standalone file with no Vails code, one cell at a time:
+  `takes_mut_ref(mut unsafe { nil })` passing the **literal** is **safe** — the
+  nil reaches the body and the check fires. `mut hook := unsafe { nil }`
+  followed by `takes_mut_ref(mut hook)` is a **hard crash**
+  (`exit -1073741819`). A plain `&T` parameter takes the same nil variable
+  without complaint, so the `mut` is the whole difference.
+
+  **The rule: never rely on a callee's nil check for a `mut` reference argument
+  — nil-check at the call site.** And do not "fix" this by adding the check to
+  the callee: `webview/host.v`'s `detach` carries a comment recording that a
+  check was added there, the suite crashed anyway, and it was removed. The three
+  `webview.detach` call sites in `services/` (`tray`, `menu`, `drop`) each keep
+  their own guard for this reason; `tray` and `menu` clear the field *before*
+  detaching, so a second detach is unreachable.
 
   **Workaround — plain reference plus `unsafe` writes**, which is what
   `webview_windows.c.v`'s `WindowJob` does (`#[heap]`, `unsafe { j.error = … }`):

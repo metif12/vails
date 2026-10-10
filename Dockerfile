@@ -76,9 +76,60 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       net-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# V from source, as a cached layer (see the header).
+# V from source, as a cached layer (see point 2 in the header).
+#
+# **The commit is pinned, and this is a fix for a measured failure rather than
+# tidiness.** This line used to clone whatever master pointed at on the day the
+# layer was *first* built, and then never rebuild: a cached layer is content-
+# addressed, so every later build reused a V from that day while the host moved
+# on. Measured on 2026-10-10, the image carried V `e5ab344`, five days stale,
+# against a host at `ef2ec06` and a master at `60542b9`.
+#
+# The consequence was concrete, and invisible from the test output: the stale V
+# still had a `json2` defect the host's had fixed (AGENTS.md §1b — a module named
+# `config` plus `net.http` in one binary decodes to a zero struct with no error).
+# So in this container `vails doctor` reported `vails.json : INVALID` on a project
+# whose config is valid, on a suite that was **45/45 green**. The same program
+# decoded correctly on the host. Nothing in the test output could tell the two
+# compilers apart, which is what makes a cached toolchain dangerous: the cache
+# decides which compiler you are testing against, and it does not announce it.
+#
+# **The first pin was `ef2ec06`, and it was wrong for a measure I had not taken:
+# it carries a Linux linker regression.** `undefined reference to
+# closure__closure_try_destroy` from `vlib/os`'s `execve`/`execvp` paths, twice
+# per suite run. V recovers by itself, so the suite still reports 45/45 — which is
+# exactly the trap above, one layer down: a green run that hides a broken compiler.
+# `10a210b` ("modulecache: own constants and emit cached declarations on demand")
+# landed after it and is the likely fix, so the pin moved to `60542b9`, which is
+# also current master. Verified on this commit: the `json2` repro decodes
+# correctly both ways, **no linker errors anywhere in the run**, and
+# `vails doctor` reports `vails.json : ok`.
+#
+# **A green suite is not a compiler check.** Both of the pins above ran 45/45,
+# and one of them had a linker bug. The check worth adding to any bump is the
+# container's `grepped` output for `collect2` / `undefined reference`, not the
+# summary line.
+#
+# Pinning also gives this file the property it argues for in point 3 above: an
+# unpinned ref can change its contents under a fixed name, which makes a green
+# run meaningless. That argument was made for the base image and left unapplied
+# to V, which is the thing that actually decides the test results.
+#
+# **Bump V_SHA deliberately.** Fetching by full sha works on GitHub for any
+# reachable commit; a *short* sha is refused ("couldn't find remote ref").
+# Before bumping, check current master (`gh api repos/vlang/v/commits/master`),
+# then verify all three things in the container rather than one:
+#   1. `vails doctor` reports `vails.json : ok` (the `json2` defect)
+#   2. no `collect2` / `undefined reference` in a full `v test .` (the closure
+#      regression) — grep for it; the summary line will not tell you
+#   3. 45/45, obviously
+# The first two are the failure modes that stayed green while being broken.
+ARG V_SHA=60542b9904a3a0102575ec1104e548996f650a83
 WORKDIR /opt/vlang
-RUN git clone --depth 1 https://github.com/vlang/v.git . \
+RUN git init -q . \
+    && git remote add origin https://github.com/vlang/v.git \
+    && git fetch --depth 1 origin $V_SHA \
+    && git checkout -q FETCH_HEAD \
     && make \
     && ./v version
 
