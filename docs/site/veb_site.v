@@ -294,7 +294,7 @@ fn veb_http_get_any(path string) !string {
 // Fixing the preview status means finding veb's override point, not a line here.
 @['/404']
 fn (mut ctx Context) not_found() veb.Result {
-	return $veb.html('404.html')
+	return $veb.html()
 }
 
 // output_path maps a route URL to the file the export writes. The mapping — the
