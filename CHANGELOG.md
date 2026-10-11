@@ -399,6 +399,27 @@ both halves of that so the next person does not have to guess which is which.
 
 ### Fixed
 
+- **`docs.yml` was red before it ever reached the site, and the cause was a
+  dependency this repository cannot see.** `oven-sh/setup-v` no longer exists; the
+  job failed at step 1 ("Set up job") with
+  `Unable to resolve action oven-sh/setup-v, repository not found`, four seconds
+  in, with nothing of the site's own involved. That is the same argument the
+  Dockerfile makes for pinning V itself, and it is why the workflow now pins
+  `vlang/setup-v@v1.7` **rather than floating on `v1`** — the two are different
+  commits in setup-v (`2c790c6` vs `663cc08`) and `v1` was last released in 2022,
+  so a float would let an unmaintained action become the toolchain without anyone
+  choosing it. Both halves of the argument are written into the workflow, because
+  the next person will paste the old action name back from a search result.
+- **The `docs.yml` build step is verified, not assumed.** The site was compiled
+  against **V 0.5.2's own veb** by extracting that tag's `vlib` and building with
+  `VMODULES` pointed at it: `v -prod -o site052.exe veb_site.v` succeeded and the
+  resulting binary exported both files with the same sizes as the master-built
+  one (831 and 693 bytes). So the claim `docs.yml` depends on — "the site is pure
+  V with no `json2`, therefore it builds on a released V" — is now measured rather
+  than reasoned. The `version: v0.5.2` string was also checked: `v0.5.2` is a real
+  ref, as is `0.5.2`.
+
+
 - **`v test .` on Linux is green: 44 of 44 test files, from 20 of 44 failing.**
   Measured 2026-10-05 in the CI container (`Dockerfile`, V `0.5.2 e5ab344`,
   WebKitGTK 2.52.6) — the first time this had ever been run on this project.

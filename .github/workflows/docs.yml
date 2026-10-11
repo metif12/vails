@@ -58,7 +58,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-v@v2
+      # `vlang/setup-v`, pinned to `v1.7` rather than floated on `v1`:
+      #
+      #   - the first version of this workflow used `oven-sh/setup-v@v2`, whose
+      #     repository no longer exists. The job failed at "Set up job" with
+      #     `Unable to resolve action oven-sh/setup-v, repository not found` -
+      #     a dependency this repository cannot fix or see, which is the exact
+      #     argument the Dockerfile makes for pinning V itself.
+      #   - `v1` and `v1.7` are *different commits* in setup-v (2c790c6 vs
+      #     663cc08), and `v1` was last released in 2022. Floating on it would
+      #     let an unmaintained action become the toolchain without anyone
+      #     choosing that.
+      #   - `v1.7` is the newest tag, released 2026-06-24, and the build below
+      #     was verified against the V it installs (`v0.5.2`, which is a real
+      #     ref - both `0.5.2` and `v0.5.2` resolve).
+      #
+      # Bump it deliberately, and re-run the export step after: the failure mode
+      # here is silent, exactly as it is for the Dockerfile's V pin.
+      - uses: vlang/setup-v@v1.7
         with:
           version: v0.5.2
       - name: Export the site
