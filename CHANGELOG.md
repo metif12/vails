@@ -251,6 +251,41 @@ why nobody wrote it, which is the part worth keeping.
   release behind — see "Not done" below.)
 
 ### Added
+- **An upstream PR for the one API this site's exporter was working around.**
+  `veb.render_request[A, X](mut app, req)` (vlang/v#30187) renders one route
+  in-process - the route table is generated from the app's methods and the
+  request is dispatched through the same `handle_request_and_route` the server
+  loop uses, with `Context.conn` left nil so nothing is written to a socket. It
+  exists as **one function rather than by making `generate_routes` and
+  `handle_request_and_route` public**, because those take a `RequestParams` whose
+  fields are veb internals and publishing that struct would freeze a shape nobody
+  should depend on. The evidence it is a real mechanism and not a new feature:
+  four of veb's own test files already do this by hand
+  (`route_arguments_test.v:58`, `cors_before_request_test.v:70`,
+  `middleware_response_lifetime_test.v:65`,
+  `controller_static_regression_test.v:112`). The PR carries a test whose
+  load-bearing case is that `conn` stays nil - a future change that started a
+  listener would pass every other assertion - plus `examples/veb/static_export/`,
+  a working static-site generator that demonstrates the three things a first
+  attempt gets wrong (an explicit export list rather than a crawl, `/404` as a
+  *file* rather than a directory, and a count check so a missing page fails the
+  build). **Measured locally:** `v test vlib/veb` is 17 passed / 24 skipped / 0
+  failed, and the example exports 3 files and previews the same 3 pages through
+  the listener. **Upstream CI did not run** - first-time-contributor approval
+  means `action_required` on every job - so there is no green upstream row and
+  the PR says so in a comment rather than let the branch look validated.
+- **`docs/site/veb_site.v` records the migration it is waiting for** rather than
+  taking it. This site still exports through a child process, and the reason is a
+  version and not a preference: `docs.yml` builds on a **released** V, and a
+  feature that landed on master yesterday is months from a release. Switching now
+  would mean either a site that only builds on V-from-source, or pinning
+  `docs.yml` to a commit - the same pattern the Dockerfile uses, which this week
+  produced a five-day-stale compiler and a latent linker bug nobody could see in a
+  green suite. The file now says exactly what the migration is: delete the process
+  machinery, call `render_request` once per route, and keep the three things that
+  were wrong twice - the route list, the path mapping, the count check - because
+  those are independent of how the HTML is produced.
+
 
 docs/site: a working veb SSG with --export, 404, pinned paths, and a docs.yml - but the site is not published
 

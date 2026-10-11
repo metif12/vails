@@ -1,7 +1,35 @@
 // veb_site.v — the Vails docs site: a veb preview server plus an --export mode
 // that writes the same HTML as static files.
 //
-// ## Why export runs a *child process*
+// ## Why this exports through a child process rather than `veb.render_request`
+//
+// Upstream now has the better API: vlang/v#30187 adds
+// `veb.render_request[A, X](mut app, req)`, which renders one route in-process
+// by generating the route table from the app's methods and dispatching through
+// the same `handle_request_and_route` the server loop uses. `Context.conn` stays
+// nil, so nothing is written to a socket and the caller reads `ctx.res.body`.
+// That removes everything this file pays for below - the child process, the
+// fixed port, and `os.executable()` - and leaves an app-side loop of about
+// twenty lines.
+//
+// It is not used here yet, and the reason is a version, not a preference:
+// **`docs.yml` builds this site on a *released* V** (`oven-sh/setup-v@v2`,
+// `version: v0.5.2`), and a feature that landed on master today is months from a
+// release. Switching this file over now would mean either a site that only builds
+// on a V built from source, or `docs.yml` itself pinned to a commit - which is
+// the same pattern the Dockerfile uses for the *library*, and which this week
+// produced a five-day-stale compiler and a latent linker bug nobody could see in
+// a green suite.
+//
+// So this file keeps the mechanism that works everywhere, and the migration is
+// one export loop away. When a V containing vlang/v#30187 is released, the
+// change is: delete `export`'s process machinery, replace the fetch loop with a
+// `render_request` call per route, and keep everything else - the route list,
+// `buildplan.site_output_path`, the count check - exactly as it is. Those three
+// are the parts that were wrong twice and they are independent of how the HTML
+// is produced.
+//
+// ## Why the export runs a *child process*
 //
 // The obvious design is to start veb on a goroutine and drive it over HTTP from
 // the same process. It crashes: AGENTS.md §2c records that `spawn` with a
