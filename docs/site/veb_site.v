@@ -292,8 +292,13 @@ fn veb_http_get_any(path string) !string {
 // `/nope` answer 200. GitHub Pages supplies the real 404 status for
 // `dist/404.html` itself, so the served artifact is correct either way.
 // Fixing the preview status means finding veb's override point, not a line here.
+// `pub` is load-bearing, not decoration. veb calls this as
+// `user_context.not_found()` from inside `vlib/veb/veb.v`, which is another
+// module, so a private method cannot be reached - V 0.5.2 says so outright:
+// `error: method Context.not_found is private`. Master compiled it without the
+// modifier, which is exactly how a missing keyword survives a local run.
 @['/404']
-fn (mut ctx Context) not_found() veb.Result {
+pub fn (mut ctx Context) not_found() veb.Result {
 	return $veb.html()
 }
 
