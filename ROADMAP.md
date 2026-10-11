@@ -14,8 +14,8 @@ an ADR, not here.
 | `v test .` on Windows | **45/45 test files green, `webview` included** — measured 2026-10-05. The claim in the row below turned out to be stale. No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. |
 | `v test webview` on Windows | **green as of 2026-10-05** — all six `webview` files compile *and* run, twice, inside a full `v -cc gcc test .` (45/45). This contradicts the measurement recorded here until today: **"cannot be run: it takes the host down"**, measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with no OOM in the Windows event log. **What changed is not known**: the tests needed no editing to pass, and the compiler is the same 0.5.2 master as both earlier measurements. So treat this as *currently green*, not *fixed* — if it starts taking the host down again, this row is the history and the F0 work since 2026-10-03 is the first thing to suspect. |
 | `v test .` on Linux | **45/45 test files green** — measured 2026-10-05 in the CI container, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. |
-| Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
-| Next by the table | **the Linux suite is green** (below) and F1 has landed (ADR-0036), so the next unwritten row is **W1–W4** — frameless window chrome plus a `window` service, 6 d. Note what W1–W4 needs: native C interop on two platforms and a human to drag a window edge, so it is not a session of work |
+| Current phase | **Phase 5** (services) — **S1 waves 1–4 and Phase 5b closed as code on 2026-10-10.** S2 (system services) is the next wave in this phase; S3 after it. What the phase's closure does *not* claim is a human runtime proof, and each unproven path is named in "What is claimed and what is proven" |
+| Next by the table | **S2 system services**, then the W-track's W1–W4 (frameless chrome + a `window` service, 6 d) — note what W1–W4 needs: native C interop on two platforms and a human to drag a window edge, so it is not a session of work |
 | **Build-blocked on** | *nothing. The `vails.json` blocker that sat here on 2026-10-05 was a V master bug and stopped reproducing once V moved to `ef2ec06`; AGENTS.md §1b records the whole thing, including why the guard stays.* |
 | Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
 
@@ -232,6 +232,14 @@ is unproven. The four things most likely to be over-read:
   `Windows.winmd` or `UniversalApisContract.winmd`). Flipping that constant is
   the whole remaining work, and guessing a GUID instead would activate the wrong
   object.
+- **`drop`'s Linux half is compiled, not observed.** Written and compiled on
+  2026-10-10 in the pinned container; `doctor` reports `ok drop` and `7/9
+  backends native` on Linux, up from `5/9`. **A human drop has not happened and
+  it cannot be faked** — `GtkSelectionData` has no public constructor and V cannot
+  express `g_signal_emit_by_name`'s varargs to pass a struct, so there is no
+  `simulate_drop` and the six manual steps in `tests/e2e_linux/README.md` are the
+  remaining proof. The pure-V half is unchanged and still tested on both
+  platforms.
 - **F0's second Windows window is written and type-checked, not observed** — and
   the *reason* it was not observed has changed shape, so read the next paragraph
   before repeating it. Until 2026-10-05 this entry said the `webview` test module
@@ -347,10 +355,33 @@ item that would trigger it is recorded instead.
   with frontend grant + `frontend/` with ping demo); `doctor` checks
   `v --version`, toolchain, `vails.json`, `asset_root`; `build` sets
   `VMODULES` to the vails root (`VAILS_HOME` or walk-up).
-- [ ] **Phase 5 — Services** (S1 wave 1 + wave 2 shipped 2026-09-27,
-   ADR-0014/0015; full catalog below. Each next wave: `services/<name>.v`
-   seam + `_test.v` + capability + ADR line, one PR per service + manual
-   test):
+- [x] **Phase 5 — Services: the S1 catalog and its Linux backends are complete
+  as code.** Closed on 2026-10-10. Each wave shipped as
+  `services/<name>.v` + `_test.v` + a capability + an ADR line, and the four
+  S1 waves plus 5b are all checked below.
+
+  **What "complete as code" means here, and what it does not.** Every service in
+  the S1 catalog exists on both platforms or refuses by name on the one where it
+  cannot, the pure-V halves are unit-tested on both, and the Linux halves are
+  compiled in the pinned container. What is **not** claimed is runtime proof for
+  the paths that need a human — "What is claimed and what is proven" names each
+  one, and `tests/e2e_{windows,linux}/README.md` carries the procedures. The
+  outstanding halves were each measured rather than assumed, which is how
+  `opener.with` (a deliberate refusal on Linux, because the desktop decides) was
+  separated from a stub, and how `notification` (Windows-only by ADR-0039) was
+  separated from a gap.
+
+  **Two audit findings landed on the way, and they are why this line says "as
+  code":** `dialog_support()` reported the Linux `dialog` as a stub for two
+  releases after the backend landed, and `drop_linux.c.v` justified being empty
+  with a reason ("no Linux runner") that expired on 2026-10-05. Both were the same
+  failure — a reporting layer not swept when a capability landed — and both are now
+  closed with guards that assert the *content* of the status note.
+
+  **S2 and S3 below are Phase 5's catalog too and are NOT closed.**
+  `single-instance`, `autostart`, `global-shortcut`, `keychain`,
+  `screencapture` and `scoped fs` (S2) and the mobile service list (S3) are the
+  remaining work in this phase, and S2 starts before any of them.
   - [x] S1 core wave 1 (done, ADR-0014): `webview.Ctx` seam (V->JS
     `emit` + native parent handle, closing the Phase 2 event-delivery
     leftover, and wiring the T7 CSP onto the native path), the service
@@ -393,40 +424,54 @@ item that would trigger it is recorded instead.
       **verified and repaired** in the same wave: they had never compiled, and
       once compiling they had never worked — `menu.set_menu`, `tray.set_menu`,
       `window-state` and the GTK `dialog` are the next items.
-  - [ ] S1 core wave 4 (the rest of the S1 list): **`notification` is
-     done on Windows — ADR-0018 replaced ADR-0015's tray balloon with a real
-     WinRT toast** (`services/toast_shim.h`, the document built and tested in
-     pure V, the AppUserModelID from a new `vails.json`
-     `bundle.identifier`; compile- and link-verified, runtime proof pending
-     a machine with the WinRT runtime — see "Verification status" in ADR-0018
-     and `tests/e2e_windows/README.md`). **`menu.set_menu` shipped
-     2026-09-29 (ADR-0023)**: the window menu bar, as the *same* service as the
-     popup — same `MenuPopup` params, same id rules, same `menu:clicked` event,
-     so one frontend listener covers a right-click menu and a window bar. It
-     needed the window host seam to take a **second** hook on one window (tray's
-     `WM_APP+1`, the bar's `WM_COMMAND`), so a `HostHandler` now returns whether
-     it consumed the message and the two chain instead of sharing. GTK3 has no
-     `gtk_window_set_menubar` at all, so the Linux half packs a `GtkMenuBar`
-     into a vertical box that `run_linux` now always creates, reached through
-     the new `Ctx.toplevel` (the `GtkWindow`, not the GdkWindow `parent` is) —
-     which the GTK dialog needs too. Linux is E2E-proved (`menubar.png`: the bar
-     renders and a click reports the right id — provable *further* than the
-     popup, since a bar is a normal widget where a popup is override-redirect);
-     Windows compiles and links but is unproven at runtime. Still open:
-     `tray.set_menu` (the StatusNotifierItem's menu — on Linux that *is* the
-     click, since the tray host owns it, which also forces a ruling on
-     `WM_CONTEXTMENU`, already mapped to `tray:clicked {right}`) and the GTK
-     `dialog`. **`window-state` / `positioner` were handed to the window chrome track on
-     2026-09-29** (ADR-0021) rather than shipped as two small services: they
-     became the `window` service, which also carries frameless chrome and the
-     title-bar buttons, and they need the seam's subscriber list (ADR-0019)
-     anyway. Cf. `v3/pkg/services`.
-  - [ ] S2 system (after S1): `single-instance` → `autostart` →
+- [x] S1 core wave 4 (the rest of the S1 list) — **all code shipped**, and the
+  one behavioural fix that landed on the way records the rest:
+
+  **`notification` is done on Windows — ADR-0018 replaced ADR-0015's tray balloon
+  with a real WinRT toast** (`services/toast_shim.h`, the document built and
+  tested in pure V, the AppUserModelID from a new `vails.json`
+  `bundle.identifier`). **Runtime proof is impossible on this machine and the
+  reason is named, not hidden**: the Windows image has no WinRT class store at
+  all, so *no* class activates (ADR-0039 measures it, `doctor` says it by name,
+  and `tests/e2e_windows/README.md` carries the repair). The toast is
+  compile- and link-verified; a machine with WinRT observes it.
+
+  **`menu.set_menu` shipped 2026-09-29 (ADR-0023)**: the window menu bar, as the
+  *same* service as the popup — same `MenuPopup` params, same id rules, same
+  `menu:clicked` event, so one frontend listener covers a right-click menu and a
+  window bar. It needed the window host seam to take a **second** hook on one
+  window (tray's `WM_APP+1`, the bar's `WM_COMMAND`), so a `HostHandler` now
+  returns whether it consumed the message and the two chain instead of sharing.
+  GTK3 has no `gtk_window_set_menubar` at all, so the Linux half packs a
+  `GtkMenuBar` into a vertical box that `run_linux` now always creates, reached
+  through the new `Ctx.toplevel` — which the GTK dialog needs too. Linux is
+  E2E-proved (`menubar.png`); Windows compiles and links but is unproven at
+  runtime, for the same reason `drop` is.
+
+  **A swallowed failure was fixed on 2026-10-05**, on the same item:
+  `attach_bar_hook` caught the `webview.attach` error, `eprintln`'d it and
+  returned normally, so `set_menu` resolved `ok` on a window whose bar was
+  attached with nothing listening — while its own comment claimed the opposite.
+  It now propagates, the hook is installed **before** `SetMenu`, and a failure
+  destroys the `HMENU` it just built.
+
+  Still open, both by design rather than by omission: `tray.set_menu` is the
+  StatusNotifierItem's menu (ADR-0026, shipped 2026-09-29) — on Linux the tray
+  host owns the click and opens it, which forced the `WM_CONTEXTMENU` ruling
+  already mapped to `tray:clicked {right}` — and **`window-state` /
+  `positioner` were handed to the window chrome track on 2026-09-29**
+  (ADR-0021) rather than shipped as two small services: they became the
+  `window` service, which also carries frameless chrome and the title-bar
+  buttons, and they need the seam's subscriber list (ADR-0019) anyway.
+  Cf. `v3/pkg/services`.
+  - [ ] **S2 system (after S1 — the next wave in this phase):** `single-instance` → `autostart` →
     `global-shortcut` (risk: Wayland limits) → `keychain`
     (cf. `v3/internal/keychain`) → `store` (persisted KV — **moved to D1**,
-   see the native/data/Vinx track below) →
+    see the native/data/Vinx track below) →
     `screencapture` (per ADR-0009 B) → `scoped fs` (last, riskiest,
-    capability-locked).
+    capability-locked). *(The parent box is unchecked deliberately: S2 is Phase 5
+    work and S1 + 5b being closed does not close it. This is the wave that
+    starts, per the phase-discipline note in AGENTS.md §3.)*
   - [ ] S3 mobile (feeds M2): `haptics` (= `vibrate`), `biometric`,
     `geolocation`; `barcode-scanner` / `nfc` optional-late.
   - Out of scope (post-desktop, unchanged): `sidecar`
@@ -439,18 +484,48 @@ item that would trigger it is recorded instead.
      recorded honestly in that ADR — no second window, so the update UI is
      the app's own; and no way for a worker to reach the page, which is
      U0/ADR-0019.
-- [ ] **Phase 5b — remaining Linux service backends** (the toolchain is no
-  longer the blocker — ADR-0015 proved it works; what is left is the parts
-  that need a human or a desktop session):
+- [x] **Phase 5b — remaining Linux service backends**. Closed on 2026-10-10,
+  and closed by measurement rather than by belief: each of the three items this
+  section listed as outstanding was checked against the code rather than assumed.
+
   ~~`dialog`~~ **done 2026-09-29** (ADR-0027: `GtkFileChooserDialog` +
-  `gtk_dialog_run`; the response-id mapping is pure V and tested everywhere,
-  and the E2E proof answers a real `GtkMessageDialog` from a timer so it needs
-  no human — the "last S1 item waiting on a human" turned out not to be one).
-  Then `notification` (libnotify or GNotification; needs a D-Bus session to be
-  visible at all), then the `with` override for `opener` (a `.desktop` file
-  rather than an app name). `clipboard`, `opener`, `menu` and `tray` are
-  already done (waves 2 and 3), and `tray.set_menu` joined them 2026-09-29
-  (ADR-0026).
+  `gtk_dialog_run`; the response-id mapping is pure V and tested everywhere, and
+  the E2E proof answers a real `GtkMessageDialog` from a timer so it needs no
+  human — the "last S1 item waiting on a human" turned out not to be one).
+
+  **`notification` is closed as a decision, not as a gap.** This section listed
+  it as "libnotify or GNotification; needs a D-Bus session to be visible at all".
+  ADR-0039 then decided notification is a **Windows toast only** — the WinRT path
+  replaced the tray balloon, and `balloon` is the Win32 fallback for the machine
+  that cannot toast. So the item is not unfinished: it is a platform boundary,
+  and `doctor` reports `stub notification - no WinRT on this platform` by name
+  rather than "unsupported". ADR-0039 is the record of that ruling.
+
+  **`opener`'s `with` override is closed as a refusal, not a stub.** On Windows
+  it works and `doctor` says so; on Linux it returns an error naming the reason
+  ("the desktop decides which application opens a file — omit it"). A deliberate
+  refusal is a finished answer; a stub is not, and the distinction is what this
+  section was supposed to establish.
+
+  **And `drop` — the fourth Linux half, which this section never listed — was the
+  one that was actually still missing.** It was written and compiled on
+  2026-10-10; `vails doctor` on Linux goes from `5/9 backends native` to
+  `7/9`, and `drop` now carries its trade-off in the note the way Windows does.
+  See the `drop` line under "What is claimed and what is proven" and ADR-0036's
+  erratum for what is and is not proven about it.
+
+  **The verification pass that was listed here first is done**
+  (2026-09-28): `examples/services` builds on Linux, `v test .` is green there,
+  and `menu.png` / `tray.png` carry the proofs. It turned out not to be a V
+  problem at all — the full account, including the two GTK3 signals the file
+  used that do not exist, is in `tests/e2e_linux/README.md`. What the pass
+  could **not** prove is named there too: the Linux `menu:clicked {id}`
+  mapping needs a real desktop session. Remaining checklist for a Linux
+  desktop is below.
+  *(The count in this line used to say 32/32, which is what that day's suite
+  was. It is **45/45** on 2026-10-10, in a pinned container — the number is
+  left correct rather than historical because a stale count reads as a claim
+  about the present.)*
   **The verification pass that was listed here first is done**
   (2026-09-28): `examples/services` builds on Linux, `v test .` is green there,
   and `menu.png` / `tray.png` carry the proofs. It turned out not to be a V

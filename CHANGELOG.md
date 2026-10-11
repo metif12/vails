@@ -19,6 +19,30 @@ Conventions for this file:
 ## [Unreleased]
 
 ### Changed
+- **Phase 5's S1 catalog and its Linux backends are closed as code**, with the
+  wording chosen so the closure cannot be over-read. The parent box, S1 core
+  wave 4, and Phase 5b are checked, and the entry says exactly what that means:
+  every service in the S1 catalog exists on both platforms or refuses by name on
+  the one where it cannot, the pure-V halves are unit-tested on both, and the
+  Linux halves are compiled in the pinned container. **What it does not claim is
+  a human runtime proof**, and each unproven path is named in "What is claimed
+  and what is proven" rather than left to inference.
+
+  Two Phase 5b items turned out to be *decisions* rather than gaps, which is a
+  different kind of closed and is recorded as such: `notification` on Linux is a
+  platform boundary ADR-0039 ruled (notification is a Windows toast; `balloon` is
+  the Win32 fallback), and `opener`'s `with` override is a deliberate refusal on
+  Linux because the desktop decides. Both were previously written as "what is
+  left". **And `drop` — the fourth Linux half, which this section never listed —
+  was the one that was actually still missing.**
+
+  **S2 and S3 stay unchecked**, because they are Phase 5's catalog too and S1 +
+  5b being closed does not close them. `single-instance`, `autostart`,
+  `global-shortcut`, `keychain`, `screencapture` and `scoped fs`, then the mobile
+  list. The phase-discipline note in AGENTS.md §3 pointed at a stale "next row"
+  too, and the table now names S2 as the next wave in this phase instead of
+  pointing at a W-track item this phase is not in yet.
+
 docs: sweep the whole repo against the facts this week produced, not just services/
 
 The lesson from the `dialog` and `drop` fixes was "when a capability lands, grep
