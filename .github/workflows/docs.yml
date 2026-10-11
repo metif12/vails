@@ -108,17 +108,31 @@ jobs:
           # failure looked like the install failed and not like one line.
           export PATH="$RUNNER_TEMP/v:$PATH"
           v version
+      - name: Build the site (with -prod, so a template error is a build error)
+        # `-prod` compiles veb's templates into the binary, which is the whole
+        # justification for this step: a template error breaks CI rather than a
+        # visitor. It must not be re-justified as "it is faster".
+        #
+        # `working-directory` is load-bearing, not tidiness. veb resolves the
+        # template directory relative to the CURRENT directory, so building from
+        # the repository root fails with `veb HTML template "404.html" not found`
+        # - measured on the run that produced this comment. The static folder and
+        # the export output are resolved from `@FILE` in `buildplan.site_paths`,
+        # so they are unaffected; only the template lookup is CWD-relative.
+        working-directory: docs/site
+        run: v -prod -o site.exe veb_site.v
       - name: Export the site
-        # `-prod` is the whole point of this step and the reason it is spelled out
-        # in PLAN.md section 7 decision 1: with it, veb's templates are compiled
-        # into the binary, so a template error breaks CI rather than a visitor.
-        # Do not "simplify" this to `v run` for speed.
-        run: v -prod run docs/site -- --export
+        # A separate step from the build, for two reasons that a combined
+        # `v -prod run` costs you: the build cannot fail the run's failure, and
+        # the `-- --export` argument is not reliably forwarded through `v run`.
+        # The first run that used the combined form sat on a listening server
+        # until the job timed out.
+        run: ./site.exe --export
       - name: Fail if the export produced nothing
-        # An exporter that "succeeds" with an empty dist/ is the exact failure this
-        # site had twice (once a 404 body as the home page, once a dist/ beside the
-        # Dockerfile). Buildplan already asserts the path mapping; this asserts the
-        # artifact is actually there.
+        # An exporter that "succeeds" with an empty dist/ is a failure this
+        # repository has already had twice - once a 404 body as the home page,
+        # once a dist/ written beside the Dockerfile. buildplan already asserts
+        # the path mapping; this asserts the artifact is actually there.
         run: |
           test -f docs/site/dist/index.html || { echo "::error::no index.html in the export"; exit 1; }
           test -f docs/site/dist/404.html || { echo "::error::no 404.html in the export"; exit 1; }
