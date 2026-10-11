@@ -58,26 +58,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # `vlang/setup-v`, pinned to `v1.7` rather than floated on `v1`:
+      # Why this action, this tag, and this version string - three separate
+      # decisions, each of which cost a red run:
       #
-      #   - the first version of this workflow used `oven-sh/setup-v@v2`, whose
-      #     repository no longer exists. The job failed at "Set up job" with
-      #     `Unable to resolve action oven-sh/setup-v, repository not found` -
-      #     a dependency this repository cannot fix or see, which is the exact
-      #     argument the Dockerfile makes for pinning V itself.
-      #   - `v1` and `v1.7` are *different commits* in setup-v (2c790c6 vs
-      #     663cc08), and `v1` was last released in 2022. Floating on it would
-      #     let an unmaintained action become the toolchain without anyone
-      #     choosing that.
-      #   - `v1.7` is the newest tag, released 2026-06-24, and the build below
-      #     was verified against the V it installs (`v0.5.2`, which is a real
-      #     ref - both `0.5.2` and `v0.5.2` resolve).
+      #   **`vlang/setup-v`, not `oven-sh/setup-v`.** That repository no longer
+      #   exists; the job failed at step 1 with `Unable to resolve action
+      #   oven-sh/setup-v, repository not found`. A dependency this repository can
+      #   neither fix nor see, which is the argument the Dockerfile makes for
+      #   pinning V itself.
       #
-      # Bump it deliberately, and re-run the export step after: the failure mode
-      # here is silent, exactly as it is for the Dockerfile's V pin.
+      #   **`v1.7`, not a floating `v1`.** The two are different commits in
+      #   setup-v (`2c790c6` vs `663cc08`) and `v1` was last released in 2022,
+      #   so floating on it would let an unmaintained action quietly become the
+      #   toolchain.
+      #
+      #   **`0.5.2`, with no `v` prefix.** This is the load-bearing one and it is
+      #   not cosmetic. `downloadPrebuilt` resolves the tag with
+      #   `getReleaseByTag({ tag })`, and V's release tags are bare - `0.5.2`,
+      #   not `v0.5.2`. Passing `v0.5.2` makes the lookup fail, the action falls
+      #   back to building V **from source**, and that build fails with a parser
+      #   error in `vlib/math/bits/bits.v:621` - because the bootstrap compiler it
+      #   downloads is newer than 0.5.2 and master has since started rejecting
+      #   the parenthesised-`if` syntax 0.5.2's vlib uses. So a wrong prefix does
+      #   not fail loudly: it silently switches to a build path that cannot work.
+      #   Measured on the run that produced this comment.
+      #
+      # The version is pinned, and bumping it means a real choice: `0.5.2` is the
+      # latest release AND the last V without a release that this repo's json2
+      # constraint excludes. Re-run the export step after any bump, for the same
+      # reason the Dockerfile's V pin says so.
       - uses: vlang/setup-v@v1.7
         with:
-          version: v0.5.2
+          version: 0.5.2
       - name: Export the site
         # `-prod` is the whole point of this step and the reason it is spelled out
         # in PLAN.md section 7 decision 1: with it, veb's templates are compiled
