@@ -399,6 +399,51 @@ both halves of that so the next person does not have to guess which is which.
 
 ### Fixed
 
+- **The docs workflow is green for the first time, and the path there was five
+  failures that were each invisible locally.** `docs.yml` now builds, exports,
+  verifies and uploads the artifact on a released V. The cascade, because the
+  order is the lesson:
+
+  1. `oven-sh/setup-v@v2` — **the repository no longer exists**. Died at step 1
+     with `Unable to resolve action oven-sh/setup-v, repository not found`.
+  2. `vlang/setup-v@v1.7` with `version: v0.5.2` — the tag looked right (both
+     `0.5.2` and `v0.5.2` are real refs, checked) and still resolved to a **source**
+     download plus `make`, which cannot succeed here: the bootstrap compiler is
+     newer than 0.5.2 and master has stopped accepting 0.5.2's parenthesised-`if`
+     syntax (`vlib/math/bits/bits.v:621`).
+  3. `vlang/setup-v@v1.7` with `version: 0.5.2` — still a source build, and the
+     reason is in the action's own history: **`downloadPrebuilt` was added after
+     tag v1.7** (`git grep downloadPrebuilt v1.7` returns nothing while HEAD has
+     it), so this action compiles V on every version, forever. So there was no
+     setup-v that fixed it, and the action was **removed** rather than
+     reconfigured.
+  4. `GITHUB_PATH` — the download, the checksum and the unzip all succeeded, and
+     the step still died with `v: command not found`, because writing
+     `$GITHUB_PATH` changes the PATH of *subsequent* steps, not the running one.
+  5. The export step — exit 127, because the build step had
+     `working-directory: docs/site` and the export did not, so `./site.exe` was
+     looked for in the repository root.
+
+  V is now installed as the **release asset V publishes**, pinned by SHA-256,
+  which also takes a third-party action out of the toolchain entirely.
+
+  Three of those five were real bugs in this repository, and both of the
+  interesting ones came from the same root: **`docs.yml` builds on a *released* V
+  while the site is developed against master**, and every divergence between them
+  showed up as a red job with nothing in the local run. `$veb.html('404.html')`
+  resolves differently on the two compilers (0.5.2 looks for
+  `<dir>/404.html`, master also falls back to `templates/`), and `not_found`
+  needed `pub` because veb calls it from another module — which master tolerated
+  and 0.5.2 refuses. Both are fixed, and **verified on both compilers** by
+  building with `VMODULES` pointed at each one's veb rather than only the one that
+  was already passing, which is the habit worth taking from this cycle.
+
+  Final state: `build` passes 8/8 steps including `upload-pages-artifact`; `deploy`
+  is skipped by design on a `pull_request` (it deploys on push to `main`, which
+  needs Pages enabled). The `windows` job remains red at the pre-existing step 4
+  "This compiler can build this repo", unchanged from `main`.
+
+
 - **`docs.yml` was red before it ever reached the site, and the cause was a
   dependency this repository cannot see.** `oven-sh/setup-v` no longer exists; the
   job failed at step 1 ("Set up job") with
