@@ -243,10 +243,23 @@ fn test_support_answers_for_this_platform_and_names_the_gap() {
 	// backend reads as a finished one.
 	assert s.note != ''
 	$if linux {
-		// The distinction this service exists to keep: unwritten is not
-		// unsupported, and only one of them is true.
-		assert !s.ready
-		assert s.note.contains('unwritten')
+		// The distinction this service existed to keep - unwritten is not
+		// unsupported, and only one of them is true - stopped being the point on
+		// 2026-10-10, when the Linux half was finally compiled. These assertions
+		// used to pin `!s.ready` and the word `unwritten`; they now pin the
+		// opposite, and they pin the *content* of the note rather than the flag
+		// so a stale line cannot come back quietly. The test that asserted the
+		// Linux half was missing was green for two days while the backend was
+		// being written, which is the §2c failure in miniature.
+		assert s.ready
+		assert !s.note.contains('unwritten')
+		assert s.note.contains('gtk_drag_dest_set')
+		assert s.note.contains('text/uri-list')
+		// And the trade-off travels with the mechanism, exactly as Windows
+		// carries it: a GTK drop is reported to the page as an event, not as
+		// DOM events, and a doctor line that said only "ok" would be the
+		// over-read the Windows note is written to avoid.
+		assert s.note.contains('drop:files')
 	} $else $if windows {
 		assert s.ready
 		// The note has to carry the trade-off, not just the mechanism: a page on

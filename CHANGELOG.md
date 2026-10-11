@@ -20,6 +20,31 @@ Conventions for this file:
 
 ### Changed
 
+- **The Linux `drop` backend is written and compiled - the last deliberate stub
+  in the services layer.** `drop_linux.c.v` was empty except for a header saying
+  the half was unwritten on purpose. The reason it gave had expired on 2026-10-05
+  (this Dockerfile builds a pinned V from source and runs 45/45 with GTK C
+  compiled in), so the one remaining blocker was the code, and it is now written.
+  `gtk_drag_dest_set` + URI target entries + the `drag-data-received` signal on
+  `Ctx.toplevel`, reading `text/uri-list` through `g_filename_from_uri` - a GTK3
+  API, not the `GtkDropTarget` the old header named, which is GTK4 and would have
+  been an unreachable build error. Linux `doctor` reports **7/9 backends native**
+  (was 5/9), and `drop` now carries its trade-off in the note the way Windows
+  already did.
+  **What is and is not proven:** the backend compiles and links in the pinned
+  container and the pure-V half is unchanged and still green on both platforms.
+  **A human drop has still not happened** - `text/uri-list` needs a real drag,
+  and the idle-callback trick that made the GTK dialog testable is not yet
+  written for a drop. `tests/e2e_linux/` carries the manual procedure, and the
+  support note does not claim otherwise.
+- The test that pinned the stub is fixed, and it pins content instead. `drop_test.v`
+  asserted `!s.ready` and the word `unwritten` on Linux - and would have gone green
+  the moment the backend was written while the doctor line still said "unwritten",
+  which is exactly what happened to `dialog` two entries above. It now asserts
+  `ready`, the mechanism (`gtk_drag_dest_set`), the payload form
+  (`text/uri-list`), and that the trade-off travels with it - so a stale line
+  cannot come back without a red test.
+
 - **The V pin moved to `60542b9`, because the first pin carried a Linux linker
   regression that a green suite hid.** `ef2ec06` was the first pin and it was
   right about the `json2` defect — but it emits `undefined reference to

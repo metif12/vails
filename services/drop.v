@@ -339,24 +339,21 @@ pub fn drop_support() ServiceStatus {
 				'WebView2 child'
 		}
 	} $else $if linux {
-		// Not a stub by accident, and **not blocked any more either**. This branch
-		// used to justify itself with "this machine has no Linux runner", and that
-		// expired on 2026-10-05: `Dockerfile` builds a pinned V from source and runs
-		// 45/45 green with GTK C compiled in, and
-		// `tests/e2e_linux/run_headless.sh` runs a real app under Xvfb. So the
-		// honest statement is now only that the half is unwritten - the environment
-		// to write it against exists.
+		// Written on 2026-10-10, and written against the container rather than
+		// against a hope: see drop_linux.c.v's header for why the old reason for
+		// not writing it ("no Linux runner here") expired, and for the two API
+		// mistakes that cost a build.
 		//
-		// The pure-V half - the bounds, the payload, the policy - is written and
-		// tested on both platforms, so only the native read is missing.
-		// `drop_linux.c.v` says the same at the file level, including what the
-		// pinned toolchain means for anyone who does write it.
+		// The note names the mechanism and the trade-off, in the same shape
+		// Windows carries it: GTK reports a drop as an event, so the page gets
+		// `drop:files` and not the DOM's dragover/drop. A support line that said
+		// only the mechanism would be an over-read in the other direction.
 		return ServiceStatus{
 			name:  'drop'
-			ready: false
-			note:  'the GTK drop-target half is unwritten (one function of C - a ' +
-				'GtkDropTarget on the toplevel reading text/uri-list); the bounds, ' +
-				'the payload and the policy are done and tested here'
+			ready: true
+			note:  'gtk_drag_dest_set + text/uri-list on the toplevel, which ' +
+				'reaches the page as drop:files and not the DOM drop events; the ' +
+				'bounds, the payload and the policy are the same pure V Windows uses'
 		}
 	} $else {
 		return ServiceStatus{
