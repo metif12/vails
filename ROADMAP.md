@@ -452,13 +452,17 @@ item that would trigger it is recorded instead.
   already done (waves 2 and 3), and `tray.set_menu` joined them 2026-09-29
   (ADR-0026).
   **The verification pass that was listed here first is done**
-  (2026-09-28): `examples/services` builds on Linux, `v test .` is 32/32 there,
+  (2026-09-28): `examples/services` builds on Linux, `v test .` is green there,
   and `menu.png` / `tray.png` carry the proofs. It turned out not to be a V
   problem at all — the full account, including the two GTK3 signals the file
   used that do not exist, is in `tests/e2e_linux/README.md`. What the pass
   could **not** prove is named there too: the Linux `menu:clicked {id}`
   mapping needs a real desktop session. Remaining checklist for a Linux
   desktop is below.
+  *(The count in this line used to say 32/32, which is what that day's suite
+  was. It is **45/45** on 2026-10-10, in a pinned container — the number is
+  left correct rather than historical because a stale count reads as a claim
+  about the present.)*
 - [ ] **Phase 6 — Cross-platform**: Windows first (WebView2/COM behind
   a C wrapper — V has no COM projection; highest risk), then macOS
   (WKWebView/ObjC). Freeze `application/` + `bridge/` API before starting.
@@ -796,10 +800,10 @@ of two (`tray`, `window`, `updater`), which is what made it worth doing first.
 what remains here is W0b (the `chrome` config plumbing) and then W1. Note that
 ADR-0019's Linux half is still unwritten, so W4's debounced `window-state` is
 Windows-provable now and not yet Linux-provable. Linux is otherwise no longer
-blocked: `v test .` is green there (32/32) and `examples/services` builds, so
-W2 is a matter of adding evidence. What stays unprovable in a container is
-unchanged and belongs to the manual checklist (the `menu:clicked {id}` mapping
-needs a desktop session). ~6 focused days.
+blocked: `v test .` is green there (45/45 in the pinned container) and
+`examples/services` builds, so W2 is a matter of adding evidence. What stays
+unprovable in a container is unchanged and belongs to the manual checklist (the
+`menu:clicked {id}` mapping needs a desktop session). ~6 focused days.
 Per AGENTS.md §3, no W-item starts while Phase 5 is the current phase. Each
 item: code + tests on both OSes + short ADR update + checkbox.
 
@@ -1050,10 +1054,11 @@ away — and until that milestone lands, the honest answer stays
 
 Order: U0 → U1 → U2 → U3 → U4 → U5 → U6 → U7, after Phase 5b, before Phase 7.
 Nothing here is a macOS commitment; Phase 6 first. Linux is not blocked —
-`v test .` is 32/32 there and the app builds, so U7's Linux entries are added
-evidence rather than an unblocking. ~14 focused days, which does **not** fit
-the "~2 focused weeks" currently claimed for S1 wave 4 + Phase 5b —
-re-baselining the roadmap against that is an open decision in ADR-0020, not
+`v test .` is 45/45 in the pinned container there and the app builds, so U7's
+Linux entries are added evidence rather than an unblocking. ~14 focused days,
+which does **not** fit the "~2 focused weeks" currently claimed for S1 wave 4 +
+Phase 5b — re-baselining the roadmap against that is an open decision in
+ADR-0020, not
 something this track decides. Note also that W0 and U0 are the same work
 (ADR-0019), and B0 gates U6. Per
 AGENTS.md §3: no U-item starts while Phase 5 is the current phase. Each item:

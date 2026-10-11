@@ -207,7 +207,7 @@ the tests:**
 
 ```powershell
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
-v -cc gcc test .    # 44 test files, `webview` included
+v -cc gcc test .    # 45 test files, `webview` included
 ```
 
 The **reason** that flag is worth knowing: `dev/` imports `net.http`, V's
@@ -226,19 +226,32 @@ __imp_connect` or `__WSAFDIsSet`, add `-ldflags "-lws2_32"` back rather than
 hunting: `buildplan.cli_flags` still emits it precisely so that this stays a
 version difference and not a mystery.
 
-`v test .` never opens a window. GUI checks stay manual — see
-`tests/e2e_windows/README.md` and `tests/e2e_linux/README.md`.
+`v test .` never opens a window, so GUI checks stay manual — see
+`tests/e2e_windows/README.md` and `tests/e2e_linux/README.md`. One caveat worth
+naming, because it is the exception and exceptions get read as rules: the Linux
+**`dialog`** proof does not stay manual, because a `GtkMessageDialog` can be
+answered from an idle callback, which is how ADR-0027 made a native GUI path
+machine-checkable. Every other GUI proof still needs a human — `drop` included,
+for the reason `tests/e2e_linux/README.md` spells out.
 
 ### Continuous integration
 
 `.github/workflows/ci.yml` runs `v test .` plus a smoke build on both
-platforms per push: Linux inside the repository's `Dockerfile` (V's own
-`thevlang/vlang:ubuntu-build` image, GTK + WebKitGTK + AppIndicator, V
-compiled once as a cached layer), Windows on a native runner with MSYS2
-ucrt64. The Windows job's distinguishing step runs `vails build` and then
-**asserts the five side-by-side DLLs are in the artifact directory** — a
-green CI that ships an `.exe` which cannot start is worse than no CI. A
-`v*` tag additionally triggers a version-stamped release build.
+platforms per push: Linux inside this repository's `Dockerfile` (GTK + WebKitGTK
++ AppIndicator, with **V cloned from source and pinned to a commit** — the
+Dockerfile header explains the measured failure that led to the pin, and the
+container it builds is what the Linux GUI proofs run against), Windows on a
+native runner with MSYS2 ucrt64. The Windows job's distinguishing step runs
+`vails build` and then **asserts the five side-by-side DLLs are in the artifact
+directory** — a green CI that ships an `.exe` which cannot start is worse than no
+CI. A `v*` tag additionally triggers a version-stamped release build.
+
+The two jobs are not equally green and it is worth knowing which is which: the
+**Linux job passes**, and the **Windows job still fails** at the step that checks
+whether the runner's own V can build this repository at all — it installs a
+*released* V, and no release contains `json2`, which `bridge/` and `state/`
+import. That is a toolchain gap, not a regression, and the Dockerfile's pin is
+why the Linux side is not affected by it.
 
 ```sh
 docker build -t vails-ci -f Dockerfile .

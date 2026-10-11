@@ -19,7 +19,41 @@ Conventions for this file:
 ## [Unreleased]
 
 ### Changed
+docs: sweep the whole repo against the facts this week produced, not just services/
 
+The lesson from the `dialog` and `drop` fixes was "when a capability lands, grep
+the reporting layer". The first sweep covered `services/`. This one covers the
+whole repo, because the claims that changed are not confined to it.
+
+Five claims, all of which understated what the project now does:
+
+- **README: "GUI checks stay manual"** with no exception. There is one:
+  the Linux `dialog` proof is machine-checkable because a `GtkMessageDialog`
+  can be answered from an idle callback (ADR-0027). A blanket rule with an
+  unnamed exception is how the exception gets read as a rule, so the exception
+  is now named in the sentence that states the rule.
+- **README: "Linux inside V's own thevlang/vlang:ubuntu-build image"** - that
+  image was removed on 2026-10-05, because its Debian 10 lineage has no
+  libwebkit2gtk-4.1-dev. It says what is actually there now: GTK + WebKitGTK +
+  AppIndicator, with V cloned from source and pinned to a commit.
+- **README: CI described without saying which half is green.** It now says the
+  Linux job passes and the Windows job still fails at the step that checks the
+  runner's own V - a toolchain gap, not a regression, and the Dockerfile pin is
+  why Linux is not affected. The doc previously implied one uniform status.
+- **ROADMAP: three stale test counts** (32/32 in the Phase 5b verification note,
+  the W-track's "Linux is no longer blocked", and the U-track's note). Now 45/45
+  in the pinned container. The counts were left as history in the places that
+  describe a past day, and corrected where they describe the present, because a
+  stale number reads as a claim about now.
+- **README: the test-file comment said 44** - now 45.
+
+ADR-0036 gets an erratum rather than a rewrite, matching the convention the other
+dated ADRs were given. Its Linux half said "no Linux runner" and named a GTK4 API
+for a GTK3 project; both are now recorded as the reason the gap stayed open for
+two releases, above the corrected text. That record is the only thing that explains
+why nobody wrote it, which is the part worth keeping.
+
+45/45 on Windows; fmt and encoding clean. No code changed.
 - **The Linux drop proof is written out rather than claimed, and the reason it
   cannot be faked is measured.** `tests/e2e_linux/README.md` gains an F1 section
   with the same shape as the Windows one: six manual steps, the expected event text
