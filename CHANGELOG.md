@@ -20,6 +20,19 @@ Conventions for this file:
 
 ### Changed
 
+- **The Linux drop proof is written out rather than claimed, and the reason it
+  cannot be faked is measured.** `tests/e2e_linux/README.md` gains an F1 section
+  with the same shape as the Windows one: six manual steps, the expected event text
+  written out for the record, and the three cases that catch the interesting
+  regressions (a file, a folder, and text dragged from a browser - the third being
+  the one that catches a phantom empty drop). `GtkSelectionData` has no public
+  constructor and V cannot express `g_signal_emit_by_name`'s varargs to pass a
+  struct, so there is no `simulate_drop` command and none was added: a command
+  whose only Linux behaviour is refusal, for a service that reports events, would
+  be an API invented for a test. That is the refusal-by-name the tracer already
+  makes. Compiling and linking in the pinned container, and `7/9 backends native`,
+  are the machine-checkable halves and are stated as exactly that much.
+
 - **The Linux `drop` backend is written and compiled - the last deliberate stub
   in the services layer.** `drop_linux.c.v` was empty except for a header saying
   the half was unwritten on purpose. The reason it gave had expired on 2026-10-05
