@@ -127,6 +127,13 @@ jobs:
         # the `-- --export` argument is not reliably forwarded through `v run`.
         # The first run that used the combined form sat on a listening server
         # until the job timed out.
+        #
+        # `working-directory` is here for the same reason as the build's: the
+        # binary is written there, and a previous version of this step ran from
+        # the repository root and failed with exit 127 (`./site.exe: not found`).
+        # The export output itself is resolved from `@FILE` via
+        # `buildplan.site_paths`, so it lands in `docs/site/dist/` either way.
+        working-directory: docs/site
         run: ./site.exe --export
       - name: Fail if the export produced nothing
         # An exporter that "succeeds" with an empty dist/ is a failure this
@@ -134,6 +141,7 @@ jobs:
         # once a dist/ written beside the Dockerfile. buildplan already asserts
         # the path mapping; this asserts the artifact is actually there.
         run: |
+          set -eu
           test -f docs/site/dist/index.html || { echo "::error::no index.html in the export"; exit 1; }
           test -f docs/site/dist/404.html || { echo "::error::no 404.html in the export"; exit 1; }
           echo "exported $(find docs/site/dist -name '*.html' | wc -l) HTML file(s)"
