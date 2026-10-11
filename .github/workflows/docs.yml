@@ -101,6 +101,12 @@ jobs:
           # The asset unpacks to `v/` with the binary at `v/v`, confirmed by
           # reading the archive rather than assuming the layout.
           echo "$RUNNER_TEMP/v" >> "$GITHUB_PATH"
+          # ...and also export it for THIS step. Writing $GITHUB_PATH changes the
+          # PATH of *subsequent* steps, not the current one, so the first version
+          # of this block died with `v: command not found` on line 11 - after the
+          # checksum and unzip had both already succeeded, which is why the
+          # failure looked like the install failed and not like one line.
+          export PATH="$RUNNER_TEMP/v:$PATH"
           v version
       - name: Export the site
         # `-prod` is the whole point of this step and the reason it is spelled out
