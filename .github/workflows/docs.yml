@@ -1,0 +1,96 @@
+# Docs - builds the docs site and publishes it to GitHub Pages.
+#
+# Separate from ci.yml for the two reasons PLAN.md section 7 gives, both of which
+# are properties rather than preferences:
+#
+#   1. it is FAST. An SSG that writes a handful of pages costs seconds, and
+#      paying for the whole V container image to do it wastes runner time;
+#   2. its failure must not redden a green build. A dead link in the docs has no
+#      reason to stop the desktop build, but inside one workflow it would, and a
+#      required check would then hold every PR hostage.
+#
+# The `paths:` filter is what keeps that promise: a docs run happens when docs
+# change, which is also why `CONTEXT.md`, `docs/ADR/**` and `v.mod` are listed -
+# those are the files the site's content is generated FROM.
+
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/site/**'
+      - 'CONTEXT.md'
+      - 'docs/ADR/**'
+      - 'ROADMAP.md'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'v.mod'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/site/**'
+      - 'CONTEXT.md'
+      - 'docs/ADR/**'
+      - 'ROADMAP.md'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'v.mod'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write # required for artifact deployment
+
+concurrency:
+  group: pages
+  # Two concurrent deployments of one branch is meaningless: the second would win
+  # and the first's logs would describe a state that no longer exists.
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # No container. The site is pure-V veb - it compiles no C - so a V with a
+    # vlib is enough, and the GTK/WebKit stack that ci.yml needs is irrelevant
+    # here. Deliberately not folded into the linux job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-v@v2
+        with:
+          version: v0.5.2
+      - name: Export the site
+        # `-prod` is the whole point of this step and the reason it is spelled out
+        # in PLAN.md section 7 decision 1: with it, veb's templates are compiled
+        # into the binary, so a template error breaks CI rather than a visitor.
+        # Do not "simplify" this to `v run` for speed.
+        run: v -prod run docs/site -- --export
+      - name: Fail if the export produced nothing
+        # An exporter that "succeeds" with an empty dist/ is the exact failure this
+        # site had twice (once a 404 body as the home page, once a dist/ beside the
+        # Dockerfile). Buildplan already asserts the path mapping; this asserts the
+        # artifact is actually there.
+        run: |
+          test -f docs/site/dist/index.html || { echo "::error::no index.html in the export"; exit 1; }
+          test -f docs/site/dist/404.html || { echo "::error::no 404.html in the export"; exit 1; }
+          echo "exported $(find docs/site/dist -name '*.html' | wc -l) HTML file(s)"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/dist
+
+  deploy:
+    # Only on a push to main. A pull request builds and uploads, which proves the
+    # step works, but publishing from a branch would make the published site lag
+    # behind a PR that closes without merging.
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

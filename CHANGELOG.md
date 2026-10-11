@@ -252,6 +252,63 @@ why nobody wrote it, which is the part worth keeping.
 
 ### Added
 
+docs/site: a working veb SSG with --export, 404, pinned paths, and a docs.yml - but the site is not published
+
+The spike PLAN.md section 7 called for is done, and it found what a spike is for.
+
+**What works, measured on this machine.** `v -prod run docs/site -- --export`
+writes `dist/index.html` (831 bytes) and `dist/404.html` (693 bytes); the preview
+server answers 200 for `/` and the CSS, and an unknown path gets the styled 404
+page; the export child process is killed on every path including panics, so a
+fixed port is not left listening. The site is one home page plus a 404 - a
+foundation, not the content, and the plan's section 6 step 5 (porting content
+from real source) is not started.
+
+**Four defects the spike caught, none of which a browser would have shown.**
+
+- **There is no veb exporter.** A search of `vlib/veb` on V 0.5.2 finds no export,
+  no dist and no crawl, so "one export command" in the plan had to be written.
+  The mechanism is the dull one on purpose: start this same binary as a child
+  process, GET every route, write what comes back, kill the child. That avoids
+  the `spawn`-with-a-`mut &T` crash recorded in AGENTS.md section 2c by not
+  having any shared mutable state to get wrong, and it means the exported HTML is
+  produced by the binary that actually ships.
+- **`handle_static(dir, root: true)` answers `/` before any route runs**, looking
+  for `index.html` inside `static/`. It is not there, so the first export
+  "succeeded" while writing a 13-byte `404 Not Found` as the home page. Fixed by
+  mounting at a `/static` prefix instead.
+- **A method with no route attribute is registered at `/${name}`**, so `index()`
+  served `/index` and left `/` to the static handler - the measured cause of that
+  same 13-byte file. Fixed with `@['/']`.
+- **The export path was resolved against the current working directory**, so a run
+  from the repository root put the site next to the Dockerfile. The mapping now
+  lives in `buildpath.site_paths` where it is unit-tested, which includes the case
+  the plan cares most about (`/404` is a *file*, not a directory, because Pages
+  looks for that exact name).
+
+**`--export` builds the 404 page but does not fix its status.** A bad URL answers
+200 in the preview, because `$veb.html(...)` builds its own response object and
+discards the one `ctx.res.set_status(.not_found)` mutated. GitHub Pages supplies
+the real status for `dist/404.html`, so the artifact is correct; the preview is
+green where it should be amber. Recorded in the code rather than papered over.
+
+**Not published.** `docs.yml` exists in the shape section 7 specifies - separate
+from `ci.yml`, `paths:`-filtered, `v -prod`, permissions for pages, artifact
+deployment - and it greps for an empty `dist/` because this repository has
+already shipped a successful export of nothing twice. It has **not been run**:
+that needs GitHub Pages enabled in the repository settings and a push to `main`,
+which is a maintainer action rather than an agent one. Until then "the site is on
+Pages" is a claim nobody can make, and the ROADMAP box stays unchecked.
+
+**A latent V bug got more reachable, and that is recorded.** Pinning V to
+`60542b9` ran the Linux suite clean; adding this site brought
+`undefined reference to closure__closure_try_destroy` back with no V change. Both
+runs are 46/46 because V recovers, which is the "green suite hiding a broken
+compiler" case the Dockerfile already warns about. The new files did not break
+anything - they made an existing latent bug reachable, and the Dockerfile says
+both halves of that so the next person does not have to guess which is which.
+
+46/46 on Windows and 46/46 in the Linux container; fmt and encoding clean.
 - **`balloon` service** (ADR-0039): `balloon.show` shows a tray balloon
   (`Shell_NotifyIconW` with `NIF_INFO`) and resolves with the mechanism that ran,
   so a frontend can tell a real shell message from a stub. It is a *secondary*

@@ -105,10 +105,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # correctly both ways, **no linker errors anywhere in the run**, and
 # `vails doctor` reports `vails.json : ok`.
 #
-# **A green suite is not a compiler check.** Both of the pins above ran 45/45,
-# and one of them had a linker bug. The check worth adding to any bump is the
+# **A green suite is not a compiler check.** Both of the pins above ran 45/45+, and
+# one of them had a linker bug. The check worth adding to any bump is the
 # container's `grepped` output for `collect2` / `undefined reference`, not the
 # summary line.
+#
+# **Latent, and re-triggered by the docs site (2026-10-11).** The pin at `60542b9`
+# ran the suite clean, and then adding `docs/site/veb_site.v` and
+# `buildplan/site_paths.v` brought the error back with no V change at all:
+#
+#     /usr/bin/ld: ....c:(.text+0xd...): undefined reference to
+#     `closure__closure_try_destroy'
+#
+# Two results are green (46/46) either way, because V recovers, so this is exactly
+# the "green suite hiding a broken compiler" case the paragraph above warns about.
+# What it tells us is that `10a210b` fixed one reachable path and not the class:
+# the failure depends on which modules the build links, so a change in *this
+# repository* can turn it back on. **Do not read a clean run as a fixed compiler,
+# and do not read this as "the site broke something" - the site only made an
+# existing latent bug reachable.** Grep every Linux run until upstream says the
+# class is closed.
 #
 # Pinning also gives this file the property it argues for in point 3 above: an
 # unpinned ref can change its contents under a fixed name, which makes a green
