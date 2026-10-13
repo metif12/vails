@@ -246,12 +246,14 @@ native runner with MSYS2 ucrt64. The Windows job's distinguishing step runs
 directory** — a green CI that ships an `.exe` which cannot start is worse than no
 CI. A `v*` tag additionally triggers a version-stamped release build.
 
-The two jobs are not equally green and it is worth knowing which is which: the
-**Linux job passes**, and the **Windows job still fails** at the step that checks
-whether the runner's own V can build this repository at all — it installs a
-*released* V, and no release contains `json2`, which `bridge/` and `state/`
-import. That is a toolchain gap, not a regression, and the Dockerfile's pin is
-why the Linux side is not affected by it.
+Both jobs build V from source at the same pinned commit (the Linux side in the
+Dockerfile, the Windows side with `makev.bat -gcc`), so they compile this
+repository against one compiler rather than two. **The Linux job passes.** The
+Windows job used to fail before it built anything, because it installed a
+*released* V and no release contains `json2`, which `bridge/` and `state/`
+import — a toolchain gap rather than a regression. That is fixed by the pin;
+whether the Windows job is green end to end is a fact only its own runner can
+report, and `ROADMAP.md` records it either way.
 
 ```sh
 docker build -t vails-ci -f Dockerfile .

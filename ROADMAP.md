@@ -113,18 +113,38 @@ array") and it exists **only on `master`**. Checked and confirmed: not in tag
 it. It lives at `vlib/json2`, not `vlib/v/json2`, which is why a `vlib/v`
 listing looks like it is missing.
 
-So the Windows job **cannot** be pinned to a release, which is the opposite of
-what pinning was supposed to buy, and it means the `-ldflags "-lws2_32"` comment
-in `ci.yml` is describing a version that cannot get as far as needing it. The
-only correct pin is a **vlang/v commit**, which means building V from source on
-the runner — the same thing the Linux container already does successfully. That
-is a real restructure of the windows job (MSYS2 has to be installed *before* V,
-because V's own Windows build needs a C compiler), and it is not done.
+So the Windows job **could not** be pinned to a release, which is the opposite of
+what pinning was supposed to buy, and it meant the `-ldflags "-lws2_32"` comment
+in `ci.yml` was describing a version that could not get as far as needing it. The
+only correct pin was a **vlang/v commit**, which means building V from source on
+the runner — the same thing the Linux container already does successfully — and
+that required a real restructure of the windows job, because MSYS2 has to be
+installed *before* V (V's own Windows build needs a C compiler).
 
-What is true right now, precisely: **CI runs jobs; the Windows job installs a
-compiler that provably cannot build this repo, and says so in one named line
-instead of failing obscurely two steps later.** That is the smoke step working
-as designed, on a machine nobody had ever run it on.
+**That restructure is done, on 2026-10-11.** The windows job now:
+
+1. installs MSYS2 ucrt64 **first**, and puts `ucrt64\bin` on PATH, because
+   `makev.bat -gcc` needs a working `cc1` and a cc1 that cannot load its own DLLs
+   fails as a silent gcc error rather than as a missing symbol;
+2. fetches V at the **same pinned commit the Dockerfile builds**
+   (`60542b9904a3a0102575ec1104e548996f650a83`), so the two CI platforms compile
+   this repository against one compiler instead of two that merely happen to
+   agree;
+3. builds it with `makev.bat -gcc` — V's own Windows build command, the first
+   thing `vlang/v`'s `windows_ci_gcc.yml` runs after checkout, so it is the
+   recipe V validates on a runner rather than one invented here.
+
+The `-ldflags` and `-cflags` stay in the job, and they stay for a reason that
+survived the restructure: they are **version-scoped**, needed on 0.5.2 and
+unnecessary on the master now pinned, and a command that works on both compilers
+is worth more than one that is minimal on whichever we happen to pin this month.
+`buildplan.cli_flags` still emits them for exactly that reason, and the test
+asserting them is what documents that they exist on purpose.
+
+What is true right now, precisely: **both jobs build against a pinned V-from-source
+compiler, and the Windows smoke step that used to fail on a release V now checks
+the pinned commit it is actually testing against.** The `json2` check is kept as
+the cheapest possible proof that the pin is the one the job thinks it is.
 
 **And the Linux backlog that became visible is now closed: 44 of 44 green.** It
 began as 20 failing files, which is not a list of flaky tests but three distinct
@@ -191,15 +211,19 @@ code in this repo should read §2c before it is written.
 The repo's own rule (AGENTS.md §5) is that a line either names a proof or says it
 is unproven. The four things most likely to be over-read:
 
-- **B2+B3 (Dockerfile + CI): the Linux job is green and the Windows one is not,
-  and neither of those is the same as "CI is green".** The "never executed" claim
-  was true until 2026-10-03. Since then the Linux container job has **passed
-  repeatedly** (5m36s on the branch in #1, after starting at 20 of 44 test files
-  failing); the Windows job **still fails**, at the step that checks whether the
-  runner's own V can build this repository at all — it installs a *released* V,
-  and no release has `json2`. So the accurate statement is "one of the two jobs is
-  green", and the more useful one is "the Linux suite is now proven on a clean
-  runner", which is something this file could not say before.
+- **B2+B3 (Dockerfile + CI): both jobs now build against a pinned V-from-source
+  compiler, which is as far as this file can claim without a green Windows run.**
+  The "never executed" claim was true until 2026-10-03. Since then the Linux
+  container job has **passed repeatedly**; the Windows job used to fail at the step
+  that checks whether the runner's own V can build this repository at all, because
+  it installed a *released* V and no release has `json2`. As of 2026-10-11 the
+  Windows job builds V from source at the same pinned commit the Dockerfile uses,
+  so that failure mode is gone by construction. **What is still unproven is the
+  run itself** — a red-to-green transition on a runner nobody has seen green is a
+  claim only the runner can settle, and this file will say which way it went when
+  it does. The accurate sentence today is: "both jobs compile against the same
+  pinned V, and the Linux half has been proven green on a clean runner many
+  times."
 - **The Linux GUI proofs need a real session, and three of the screenshots this
   file used to cite have never existed.** `git log --all` returns **zero commits**
   for `tests/e2e_windows/tray.png`, `tests/e2e_windows/menu.png` and
