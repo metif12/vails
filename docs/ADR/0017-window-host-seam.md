@@ -39,12 +39,27 @@ them new for `menu`/`tray`/`webview.host`); `v -o vails ./cli` builds on both
 platforms and `v -gc none -o services ./examples/services` builds on Linux with
 all seven backends compiled in; the Windows tray click loop proven
 machine-checkably end to end (`PostMessage(WM_APP+1)` → subclass → V →
-`ctx.emit` → the page's `tray:clicked` handler, screenshot
-`tests/e2e_windows/tray.png`); a real `TrackPopupMenuEx` popup captured in
-`tests/e2e_windows/menu.png`; `vails doctor` reporting 7/7 native backends on
-Windows. **Pending:** the Linux `v test` run and the Linux screenshots — see
-"Verification status" in `tests/e2e_linux/README.md` for the exact state and
-the one compiler issue that is holding it.
+`ctx.emit` → the page's `tray:clicked` handler); a real `TrackPopupMenuEx` popup
+captured; `vails doctor` reporting 7/7 native backends on Windows.
+
+> **Erratum (2026-10-05).** This paragraph originally ended by citing two
+> screenshots as its evidence — `tests/e2e_windows/tray.png` and
+> `tests/e2e_windows/menu.png` — and **neither file has ever existed in this
+> repository**: `git log --all` for both paths returns no commits. So the
+> sentence was evidence-shaped without evidence. The tray loop is still proven by
+> what the paragraph actually describes (the `PostMessage` → subclass → V →
+> `ctx.emit` chain, machine-checkable, and re-run by the E2E scripts); what was
+> missing was only the images, so the citation is gone rather than the claim.
+> `README.md` carried the same dead `tray.png` citation and has been corrected.
+>
+> **Also resolved:** the trailing "**Pending:** the Linux `v test` run and the
+> Linux screenshots … the one compiler issue that is holding it" is no longer
+> true. Linux `v test .` runs and is **44/44 green** (measured 2026-10-05, the
+> first Linux run this project ever had); the compiler issue was the whole
+> `services` module failing to build because `drop.v` named a Windows-only
+> function, and it is fixed. Linux screenshots other than the four committed in
+> `tests/e2e_linux/` are still absent, and ADR-0027 records the same gap for the
+> GTK dialog.
 
 ## Decisions
 

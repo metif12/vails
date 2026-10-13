@@ -18,8 +18,332 @@ Conventions for this file:
 
 ## [Unreleased]
 
-### Added
+### Changed
+- **Phase 5's S1 catalog and its Linux backends are closed as code**, with the
+  wording chosen so the closure cannot be over-read. The parent box, S1 core
+  wave 4, and Phase 5b are checked, and the entry says exactly what that means:
+  every service in the S1 catalog exists on both platforms or refuses by name on
+  the one where it cannot, the pure-V halves are unit-tested on both, and the
+  Linux halves are compiled in the pinned container. **What it does not claim is
+  a human runtime proof**, and each unproven path is named in "What is claimed
+  and what is proven" rather than left to inference.
 
+  Two Phase 5b items turned out to be *decisions* rather than gaps, which is a
+  different kind of closed and is recorded as such: `notification` on Linux is a
+  platform boundary ADR-0039 ruled (notification is a Windows toast; `balloon` is
+  the Win32 fallback), and `opener`'s `with` override is a deliberate refusal on
+  Linux because the desktop decides. Both were previously written as "what is
+  left". **And `drop` — the fourth Linux half, which this section never listed —
+  was the one that was actually still missing.**
+
+  **S2 and S3 stay unchecked**, because they are Phase 5's catalog too and S1 +
+  5b being closed does not close them. `single-instance`, `autostart`,
+  `global-shortcut`, `keychain`, `screencapture` and `scoped fs`, then the mobile
+  list. The phase-discipline note in AGENTS.md §3 pointed at a stale "next row"
+  too, and the table now names S2 as the next wave in this phase instead of
+  pointing at a W-track item this phase is not in yet.
+
+docs: sweep the whole repo against the facts this week produced, not just services/
+
+The lesson from the `dialog` and `drop` fixes was "when a capability lands, grep
+the reporting layer". The first sweep covered `services/`. This one covers the
+whole repo, because the claims that changed are not confined to it.
+
+Five claims, all of which understated what the project now does:
+
+- **README: "GUI checks stay manual"** with no exception. There is one:
+  the Linux `dialog` proof is machine-checkable because a `GtkMessageDialog`
+  can be answered from an idle callback (ADR-0027). A blanket rule with an
+  unnamed exception is how the exception gets read as a rule, so the exception
+  is now named in the sentence that states the rule.
+- **README: "Linux inside V's own thevlang/vlang:ubuntu-build image"** - that
+  image was removed on 2026-10-05, because its Debian 10 lineage has no
+  libwebkit2gtk-4.1-dev. It says what is actually there now: GTK + WebKitGTK +
+  AppIndicator, with V cloned from source and pinned to a commit.
+- **README: CI described without saying which half is green.** It now says the
+  Linux job passes and the Windows job still fails at the step that checks the
+  runner's own V - a toolchain gap, not a regression, and the Dockerfile pin is
+  why Linux is not affected. The doc previously implied one uniform status.
+- **ROADMAP: three stale test counts** (32/32 in the Phase 5b verification note,
+  the W-track's "Linux is no longer blocked", and the U-track's note). Now 45/45
+  in the pinned container. The counts were left as history in the places that
+  describe a past day, and corrected where they describe the present, because a
+  stale number reads as a claim about now.
+- **README: the test-file comment said 44** - now 45.
+
+ADR-0036 gets an erratum rather than a rewrite, matching the convention the other
+dated ADRs were given. Its Linux half said "no Linux runner" and named a GTK4 API
+for a GTK3 project; both are now recorded as the reason the gap stayed open for
+two releases, above the corrected text. That record is the only thing that explains
+why nobody wrote it, which is the part worth keeping.
+
+45/45 on Windows; fmt and encoding clean. No code changed.
+- **The Linux drop proof is written out rather than claimed, and the reason it
+  cannot be faked is measured.** `tests/e2e_linux/README.md` gains an F1 section
+  with the same shape as the Windows one: six manual steps, the expected event text
+  written out for the record, and the three cases that catch the interesting
+  regressions (a file, a folder, and text dragged from a browser - the third being
+  the one that catches a phantom empty drop). `GtkSelectionData` has no public
+  constructor and V cannot express `g_signal_emit_by_name`'s varargs to pass a
+  struct, so there is no `simulate_drop` command and none was added: a command
+  whose only Linux behaviour is refusal, for a service that reports events, would
+  be an API invented for a test. That is the refusal-by-name the tracer already
+  makes. Compiling and linking in the pinned container, and `7/9 backends native`,
+  are the machine-checkable halves and are stated as exactly that much.
+
+- **The Linux `drop` backend is written and compiled - the last deliberate stub
+  in the services layer.** `drop_linux.c.v` was empty except for a header saying
+  the half was unwritten on purpose. The reason it gave had expired on 2026-10-05
+  (this Dockerfile builds a pinned V from source and runs 45/45 with GTK C
+  compiled in), so the one remaining blocker was the code, and it is now written.
+  `gtk_drag_dest_set` + URI target entries + the `drag-data-received` signal on
+  `Ctx.toplevel`, reading `text/uri-list` through `g_filename_from_uri` - a GTK3
+  API, not the `GtkDropTarget` the old header named, which is GTK4 and would have
+  been an unreachable build error. Linux `doctor` reports **7/9 backends native**
+  (was 5/9), and `drop` now carries its trade-off in the note the way Windows
+  already did.
+  **What is and is not proven:** the backend compiles and links in the pinned
+  container and the pure-V half is unchanged and still green on both platforms.
+  **A human drop has still not happened** - `text/uri-list` needs a real drag,
+  and the idle-callback trick that made the GTK dialog testable is not yet
+  written for a drop. `tests/e2e_linux/` carries the manual procedure, and the
+  support note does not claim otherwise.
+- The test that pinned the stub is fixed, and it pins content instead. `drop_test.v`
+  asserted `!s.ready` and the word `unwritten` on Linux - and would have gone green
+  the moment the backend was written while the doctor line still said "unwritten",
+  which is exactly what happened to `dialog` two entries above. It now asserts
+  `ready`, the mechanism (`gtk_drag_dest_set`), the payload form
+  (`text/uri-list`), and that the trade-off travels with it - so a stale line
+  cannot come back without a red test.
+
+- **The V pin moved to `60542b9`, because the first pin carried a Linux linker
+  regression that a green suite hid.** `ef2ec06` was the first pin and it was
+  right about the `json2` defect — but it emits `undefined reference to
+  closure__closure_try_destroy` from `vlib/os`'s `execve`/`execvp` paths, twice
+  per suite run. V recovers on its own, so **the summary still said 45/45**, which
+  is the cache-staleness trap one layer down: a green run that hides a broken
+  compiler. `10a210b` ("modulecache: own constants and emit cached
+  declarations on demand") landed after it and is the likely fix; verified on this
+  commit — the `json2` repro decodes correctly both ways, **no linker errors
+  anywhere in the run**, and `vails doctor` reports `vails.json : ok`. The
+  Dockerfile now names the regression, and the bump procedure says to grep for
+  `collect2` / `undefined reference` rather than trusting the summary line.
+- **`drop`'s Linux half is the last deliberate stub, and its stated reason for
+  being one expired.** `drop_linux.c.v` and `drop_support()` both said "this
+  machine has no Linux runner", and that stopped being true on 2026-10-05: the
+  Dockerfile builds a pinned V from source, runs the suite 45/45 green **with GTK
+  C compiled in**, and `run_headless.sh` runs a real app under Xvfb. Both files,
+  and the ROADMAP's `drop` line, now say the gap is the code and not the ability
+  to prove it — recorded rather than left inherited, because a stale reason reads
+  as a blocker and the next person does not start. The support note still says
+  `unwritten` rather than `unsupported`, because those are different claims.
+
+- **The Dockerfile's V layer was five days stale, and that is why the json2 bug
+  "came back" on Linux.** The layer cloned whatever master pointed at on the day
+  it was first built and then never rebuilt, because a cached layer is content-
+  addressed: every later `docker build` reused a V from 2026-10-05 while the host
+  moved on. Measured 2026-10-10: the image carried V `e5ab344` while the Windows
+  host ran `ef2ec06`. The stale V still had the `config` + `net.http` zero-decode
+  defect (AGENTS.md §1b), so in the container `vails doctor` reported
+  `vails.json : INVALID` **on a suite that was 45/45 green**, while the same
+  command on the host reported `ok`. Nothing in the test output could tell the
+  two compilers apart, which is the whole danger: the cache chooses which
+  compiler you are testing against and does not announce it. V is now pinned to a
+  commit, fetched by full sha (a short sha is refused by GitHub), with the
+  measured failure and the bump procedure in the Dockerfile. Pinning also gives
+  this file the property its own header argues for in point 3 and had left
+  unapplied to V — an unpinned ref can change under a fixed name, which makes a
+  green run meaningless.
+- **`vails doctor` stopped lying about the Linux dialog, and the test that kept
+  it quiet is fixed too.** `dialog_support()` answered `stub: the GTK chooser
+  lands in Phase 5b` on Linux for two releases after Phase 5b landed the real
+  backend (ADR-0027) — so `doctor` said `stub dialog`, `5/9 backends native`, on
+  a machine with `GtkFileChooserDialog` compiled in and its response mapping
+  tested. `services/support_test.v:67` was pinning the opposite assertion, with a
+  comment saying dialog "is still the GTK stub", so the stale line was green the
+  whole time. That is the §2c failure at service scale: a test that asserts
+  something false. Both are fixed, and the new assertions pin the *content* of the
+  note — `ready` and `GtkFileChooserDialog` present, `stub` absent — so the stub
+  cannot come back without a red test. Linux `doctor` now reports
+  `6/9 backends native, ok dialog - GtkFileChooserDialog + GtkMessageDialog`.
+  Seen red by planting the stub string back on Linux
+  (`assert dialog_support().ready` failed), then green on restore — which is also
+  the first time the container has been used to turn a Windows-only check red.
+
+- **The `json2` zero-decode bug no longer reproduces, and the three `.d.ts` are
+  regenerated.** The compiler moved from `bb0d229` to `ef2ec06` while this branch
+  was open and the bug stopped reproducing — verified across three fresh project
+  roots, `vails doctor` reporting `vails.json : ok`, and `vails dts` regenerating.
+  The blocking-command JSDoc now reaches all three checked-in declarations
+  (11 added lines, no churn). `buildplan/json2_import_test.v` is unchanged: it is a
+  guard on this repository's test layout, and a second `net.http` importer goes red
+  at review time now rather than at `vails doctor` time. AGENTS.md 1b records the
+  whole thing, including **two explanations that were offered and then killed** —
+  the `_str_N` literal collision (refuted by a control: an *unused* `import sync`
+  changes 507 of 2160 identical-index literals and both programs decode
+  correctly) and "a module named `cfg` is special too" (refuted: it is a *variable*
+  named `cfg` colliding with `import cfg`; a module named `zzz` with a variable
+  `zzz` fails identically).
+- **A documentation accuracy pass on the one file the last pass only partly
+  reached.** `ROADMAP.md` carried four claims that had been overtaken, and all four
+  under-stated what the project now does:
+
+  - *"`menu.png` / `tray.png` / `dialog.png` exist"* — `git log --all` returns zero
+    commits for all three. ADR-0017 and ADR-0027 are where the citations were fixed;
+    this file had been left saying the screenshots exist.
+  - *"the runner has still never reported a single green job"* — the Linux container
+    job passes, and this branch is what took it there.
+  - *"this machine crashes its host on the `webview` test module"* — all six files
+    compile **and** run, twice, at 45/45, on the same compiler both measurements
+    were made against. Kept as history, labelled *currently green* rather than
+    *fixed*, because **what changed is not known**.
+  - the priority table called F1 drag & drop "planned" — it landed as ADR-0036 on
+    2026-10-03. The next unwritten row is W1-W4.
+
+  `ADR-0038` gains a dated implementation note rather than a rewrite: the resolver
+  now has a production caller (`vails doctor`), an unset `VAILS_TOOLCHAIN` prints
+  the byte-identical header path as before, a set one no longer reports the default
+  root as healthy, and the `#flag` half is still unwritten and still uncompiled.
+- **Documentation accuracy pass, 2026-10-05.** No behaviour changed; three
+  documents no longer cite screenshots that have never existed in this repository.
+  `git log --all` returns **zero commits** for `tests/e2e_windows/tray.png`,
+  `tests/e2e_windows/menu.png` and `tests/e2e_linux/dialog.png`, yet ADR-0017
+  cited the first two as its evidence, ADR-0027 cited the third as "Linux, proven
+  end to end", and `README.md` cited the first as the tray's "E2E proof". The runs
+  themselves are not in doubt — the tray loop is still machine-checked by the E2E
+  script's `PostMessage` -> subclass -> `tray:clicked` assertion — but the
+  citations were evidence-shaped without evidence, which is the one failure mode
+  this project cannot afford in a document other people rely on. The dated ADRs
+  got **errata appended rather than rewritten**, so the record of what was believed
+  on the day stays intact; the living docs (`README.md`, `ROADMAP.md`) were
+  corrected directly. One broken markdown image link removed, and the Linux
+  `v test` status in ADR-0017 updated from "Pending" (with a named compiler
+  blocker) to 44/44 green.
+
+  Two further claims were stale in the same pass, and both were wrong in the
+  direction of under-reporting what the project achieves:
+
+  - **`v test webview` on Windows.** `ROADMAP.md` said it "cannot be run: it
+    takes the host down", measured 4× on 2026-09-30 and again on 2026-10-03. On
+    2026-10-05 all six files compile **and** run, twice, inside a full
+    `v -cc gcc test .`. What changed is not known — no test needed editing and
+    the compiler is the same. The row now records the history and labels this
+    *currently green*, not *fixed*, because a claim with no known cause should
+    not be stated without its history.
+  - **The Windows test command "carries one extra flag, and it is not
+    optional"** — over a code block that contained no extra flag. No link flag
+    has been needed since the move to the V master build this project requires;
+    `README.md` now says so and keeps the reason, so the flag is recognisable as
+    version-scoped rather than mysterious.
+- **`menu.set_menu` now fails instead of pretending it worked.** If the window's
+  message hook cannot be installed, `set_menu` returns that error rather than
+  swallowing it, and the `HMENU` it just built is destroyed rather than leaked.
+  The hook is now installed *before* `SetMenu`, so there is no window in which a
+  click can arrive for a menu the window is not yet routing. Previously a failed
+  hook left the handler counting clicks against a bar that would never be
+  drawn. Two tests pin it: one at the native seam, one at `set_menu`.
+- **`vails dts` now marks the blocking commands in the generated `.d.ts`.** The
+  four commands that open a native dialog — `dialog.message`, `dialog.open`,
+  `dialog.save`, `menu.popup` — get a JSDoc note, so an editor can tell a call
+  that will not resolve until a human answers from one that resolves
+  immediately. The set is pinned by a test, so a fifth blocking command shipped
+  without a marker fails the suite. (The checked-in example declarations are one
+  release behind — see "Not done" below.)
+
+### Added
+- **An upstream PR for the one API this site's exporter was working around.**
+  `veb.render_request[A, X](mut app, req)` (vlang/v#30187) renders one route
+  in-process - the route table is generated from the app's methods and the
+  request is dispatched through the same `handle_request_and_route` the server
+  loop uses, with `Context.conn` left nil so nothing is written to a socket. It
+  exists as **one function rather than by making `generate_routes` and
+  `handle_request_and_route` public**, because those take a `RequestParams` whose
+  fields are veb internals and publishing that struct would freeze a shape nobody
+  should depend on. The evidence it is a real mechanism and not a new feature:
+  four of veb's own test files already do this by hand
+  (`route_arguments_test.v:58`, `cors_before_request_test.v:70`,
+  `middleware_response_lifetime_test.v:65`,
+  `controller_static_regression_test.v:112`). The PR carries a test whose
+  load-bearing case is that `conn` stays nil - a future change that started a
+  listener would pass every other assertion - plus `examples/veb/static_export/`,
+  a working static-site generator that demonstrates the three things a first
+  attempt gets wrong (an explicit export list rather than a crawl, `/404` as a
+  *file* rather than a directory, and a count check so a missing page fails the
+  build). **Measured locally:** `v test vlib/veb` is 17 passed / 24 skipped / 0
+  failed, and the example exports 3 files and previews the same 3 pages through
+  the listener. **Upstream CI did not run** - first-time-contributor approval
+  means `action_required` on every job - so there is no green upstream row and
+  the PR says so in a comment rather than let the branch look validated.
+- **`docs/site/veb_site.v` records the migration it is waiting for** rather than
+  taking it. This site still exports through a child process, and the reason is a
+  version and not a preference: `docs.yml` builds on a **released** V, and a
+  feature that landed on master yesterday is months from a release. Switching now
+  would mean either a site that only builds on V-from-source, or pinning
+  `docs.yml` to a commit - the same pattern the Dockerfile uses, which this week
+  produced a five-day-stale compiler and a latent linker bug nobody could see in a
+  green suite. The file now says exactly what the migration is: delete the process
+  machinery, call `render_request` once per route, and keep the three things that
+  were wrong twice - the route list, the path mapping, the count check - because
+  those are independent of how the HTML is produced.
+
+
+docs/site: a working veb SSG with --export, 404, pinned paths, and a docs.yml - but the site is not published
+
+The spike PLAN.md section 7 called for is done, and it found what a spike is for.
+
+**What works, measured on this machine.** `v -prod run docs/site -- --export`
+writes `dist/index.html` (831 bytes) and `dist/404.html` (693 bytes); the preview
+server answers 200 for `/` and the CSS, and an unknown path gets the styled 404
+page; the export child process is killed on every path including panics, so a
+fixed port is not left listening. The site is one home page plus a 404 - a
+foundation, not the content, and the plan's section 6 step 5 (porting content
+from real source) is not started.
+
+**Four defects the spike caught, none of which a browser would have shown.**
+
+- **There is no veb exporter.** A search of `vlib/veb` on V 0.5.2 finds no export,
+  no dist and no crawl, so "one export command" in the plan had to be written.
+  The mechanism is the dull one on purpose: start this same binary as a child
+  process, GET every route, write what comes back, kill the child. That avoids
+  the `spawn`-with-a-`mut &T` crash recorded in AGENTS.md section 2c by not
+  having any shared mutable state to get wrong, and it means the exported HTML is
+  produced by the binary that actually ships.
+- **`handle_static(dir, root: true)` answers `/` before any route runs**, looking
+  for `index.html` inside `static/`. It is not there, so the first export
+  "succeeded" while writing a 13-byte `404 Not Found` as the home page. Fixed by
+  mounting at a `/static` prefix instead.
+- **A method with no route attribute is registered at `/${name}`**, so `index()`
+  served `/index` and left `/` to the static handler - the measured cause of that
+  same 13-byte file. Fixed with `@['/']`.
+- **The export path was resolved against the current working directory**, so a run
+  from the repository root put the site next to the Dockerfile. The mapping now
+  lives in `buildpath.site_paths` where it is unit-tested, which includes the case
+  the plan cares most about (`/404` is a *file*, not a directory, because Pages
+  looks for that exact name).
+
+**`--export` builds the 404 page but does not fix its status.** A bad URL answers
+200 in the preview, because `$veb.html(...)` builds its own response object and
+discards the one `ctx.res.set_status(.not_found)` mutated. GitHub Pages supplies
+the real status for `dist/404.html`, so the artifact is correct; the preview is
+green where it should be amber. Recorded in the code rather than papered over.
+
+**Not published.** `docs.yml` exists in the shape section 7 specifies - separate
+from `ci.yml`, `paths:`-filtered, `v -prod`, permissions for pages, artifact
+deployment - and it greps for an empty `dist/` because this repository has
+already shipped a successful export of nothing twice. It has **not been run**:
+that needs GitHub Pages enabled in the repository settings and a push to `main`,
+which is a maintainer action rather than an agent one. Until then "the site is on
+Pages" is a claim nobody can make, and the ROADMAP box stays unchecked.
+
+**A latent V bug got more reachable, and that is recorded.** Pinning V to
+`60542b9` ran the Linux suite clean; adding this site brought
+`undefined reference to closure__closure_try_destroy` back with no V change. Both
+runs are 46/46 because V recovers, which is the "green suite hiding a broken
+compiler" case the Dockerfile already warns about. The new files did not break
+anything - they made an existing latent bug reachable, and the Dockerfile says
+both halves of that so the next person does not have to guess which is which.
+
+46/46 on Windows and 46/46 in the Linux container; fmt and encoding clean.
 - **`balloon` service** (ADR-0039): `balloon.show` shows a tray balloon
   (`Shell_NotifyIconW` with `NIF_INFO`) and resolves with the mechanism that ran,
   so a frontend can tell a real shell message from a stub. It is a *secondary*
@@ -51,6 +375,18 @@ Conventions for this file:
 
 ### Changed
 
+- **`vails doctor` resolves the Windows toolchain instead of asserting one
+  machine's path** (ADR-0038). The `webview` line checked
+  `C:/msys64/ucrt64/include/webview/webview.h` literally, so a relocated or
+  scoped toolchain was reported against the one root that cannot be the answer.
+  It now goes through `buildplan.resolve_toolchain()` — already the tested owner
+  of that decision, previously with no production caller — and a new
+  `toolchain` line names the resolved root and where it came from. An unset
+  `VAILS_TOOLCHAIN` prints the same header path as before, because the default
+  *is* that root; a set one follows, and any missing piece (`webview.h`,
+  `libwebview.dll.a`, the `bin` directory holding the five side-by-side DLLs) is
+  listed once, here, instead of surfacing as a header error three minutes into a
+  build.
 - **`vails doctor` now names the cause of an unavailable toast**
   (ADR-0039). It previously reported `REGDB_E_CLASSNOTREG`, whose two causes -
   a wrong AppUserModelID and a Windows with no WinRT class store - need opposite
@@ -63,6 +399,109 @@ Conventions for this file:
 
 ### Fixed
 
+- **The docs workflow is green for the first time, and the path there was five
+  failures that were each invisible locally.** `docs.yml` now builds, exports,
+  verifies and uploads the artifact on a released V. The cascade, because the
+  order is the lesson:
+
+  1. `oven-sh/setup-v@v2` — **the repository no longer exists**. Died at step 1
+     with `Unable to resolve action oven-sh/setup-v, repository not found`.
+  2. `vlang/setup-v@v1.7` with `version: v0.5.2` — the tag looked right (both
+     `0.5.2` and `v0.5.2` are real refs, checked) and still resolved to a **source**
+     download plus `make`, which cannot succeed here: the bootstrap compiler is
+     newer than 0.5.2 and master has stopped accepting 0.5.2's parenthesised-`if`
+     syntax (`vlib/math/bits/bits.v:621`).
+  3. `vlang/setup-v@v1.7` with `version: 0.5.2` — still a source build, and the
+     reason is in the action's own history: **`downloadPrebuilt` was added after
+     tag v1.7** (`git grep downloadPrebuilt v1.7` returns nothing while HEAD has
+     it), so this action compiles V on every version, forever. So there was no
+     setup-v that fixed it, and the action was **removed** rather than
+     reconfigured.
+  4. `GITHUB_PATH` — the download, the checksum and the unzip all succeeded, and
+     the step still died with `v: command not found`, because writing
+     `$GITHUB_PATH` changes the PATH of *subsequent* steps, not the running one.
+  5. The export step — exit 127, because the build step had
+     `working-directory: docs/site` and the export did not, so `./site.exe` was
+     looked for in the repository root.
+
+  V is now installed as the **release asset V publishes**, pinned by SHA-256,
+  which also takes a third-party action out of the toolchain entirely.
+
+  Three of those five were real bugs in this repository, and both of the
+  interesting ones came from the same root: **`docs.yml` builds on a *released* V
+  while the site is developed against master**, and every divergence between them
+  showed up as a red job with nothing in the local run. `$veb.html('404.html')`
+  resolves differently on the two compilers (0.5.2 looks for
+  `<dir>/404.html`, master also falls back to `templates/`), and `not_found`
+  needed `pub` because veb calls it from another module — which master tolerated
+  and 0.5.2 refuses. Both are fixed, and **verified on both compilers** by
+  building with `VMODULES` pointed at each one's veb rather than only the one that
+  was already passing, which is the habit worth taking from this cycle.
+
+  Final state: `build` passes 8/8 steps including `upload-pages-artifact`; `deploy`
+  is skipped by design on a `pull_request` (it deploys on push to `main`, which
+  needs Pages enabled). The `windows` job remains red at the pre-existing step 4
+  "This compiler can build this repo", unchanged from `main`.
+
+
+- **`docs.yml` was red before it ever reached the site, and the cause was a
+  dependency this repository cannot see.** `oven-sh/setup-v` no longer exists; the
+  job failed at step 1 ("Set up job") with
+  `Unable to resolve action oven-sh/setup-v, repository not found`, four seconds
+  in, with nothing of the site's own involved. That is the same argument the
+  Dockerfile makes for pinning V itself, and it is why the workflow now pins
+  `vlang/setup-v@v1.7` **rather than floating on `v1`** — the two are different
+  commits in setup-v (`2c790c6` vs `663cc08`) and `v1` was last released in 2022,
+  so a float would let an unmaintained action become the toolchain without anyone
+  choosing it. Both halves of the argument are written into the workflow, because
+  the next person will paste the old action name back from a search result.
+- **The `docs.yml` build step is verified, not assumed.** The site was compiled
+  against **V 0.5.2's own veb** by extracting that tag's `vlib` and building with
+  `VMODULES` pointed at it: `v -prod -o site052.exe veb_site.v` succeeded and the
+  resulting binary exported both files with the same sizes as the master-built
+  one (831 and 693 bytes). So the claim `docs.yml` depends on — "the site is pure
+  V with no `json2`, therefore it builds on a released V" — is now measured rather
+  than reasoned. The `version: v0.5.2` string was also checked: `v0.5.2` is a real
+  ref, as is `0.5.2`.
+
+
+- **`v test .` on Linux is green: 44 of 44 test files, from 20 of 44 failing.**
+  Measured 2026-10-05 in the CI container (`Dockerfile`, V `0.5.2 e5ab344`,
+  WebKitGTK 2.52.6) — the first time this had ever been run on this project.
+  Twenty files failed for **three** root causes, none of them flaky:
+  - **`services` did not compile at all on Linux**, so all 13 `services` test
+    files failed at once. `drop.v`'s `on_drop_message` called
+    `read_dropped_paths_native`, which is Windows-only: a platform-neutral module
+    may not name a platform function, so the *whole module* failed, not one
+    function. `on_drop_message` moved to `drop_windows.c.v` beside its only caller
+    and its only platform dependency — the same arrangement
+    `menu_windows.c.v`'s `on_bar_command` already used. Every testable piece
+    (`decide_drop`, `validate_dropped_paths`, `drop_files_data`) stayed in
+    `drop.v` and stays covered on both platforms.
+  - **`webview/webview_linux.c.v` had 7 compile errors**: `vails_window_opened`
+    and `vails_window_closed` were never declared on the V side (they are
+    `static inline` in the shim, and an `#insert`-ed header supplies definitions
+    but not V signatures); `label_js(...)` was passed where `vails_add_runtime`
+    wants a `&char`; and four `mut` errors on `win`. All seven are the F0
+    multi-window work that had only ever been compiled on Windows.
+  - **`webview/jobs_test.v` asserted a Windows-only error string.** The refusal is
+    real on both platforms and the load-bearing half of the property — refused
+    *before* queueing, so the queue is not holding a job nothing will run — is
+    asserted everywhere. Only the wording is platform-specific, so each platform
+    now asserts its own message rather than one of them passing vacuously.
+  - Consequence worth stating plainly: **the six `webview` test files now run on
+    Linux**, which is coverage Windows cannot give at all (on Windows they take
+    the host down — see ROADMAP). Windows is unchanged at 44/44.
+- **`app_flags` is a pure function of its `target` argument again.** Its `-cc gcc`
+  branch was wrapped in `$if windows`, so `app_flags(.windows)` returned `[]` when
+  called on Linux: a Windows build plan could only be checked on a Windows
+  machine, which is precisely the half-checking that taking `Target` as an
+  argument exists to prevent. Found by the Linux run, in the test written to catch
+  exactly this. The `$if` was never load-bearing — the only production caller
+  passes the host's own target — and `cli_flags` has always added its Windows
+  flags without one, which is what made the outlier visible. No real build
+  changes; `buildplan_test.v`'s exact-equality assertion now runs and bites on
+  both platforms.
 - **`emit_to` across windows no longer crashes the process or lie about
   succeeding** (F0, found by running `examples/multiwindow` on 2026-10-04 — two
   defects that had shipped since 2026-09-30 behind a green `v vet`):
@@ -506,6 +945,52 @@ Conventions for this file:
 
 ### Not done in this release
 
+- **The `vails` CLI cannot read `vails.json`.** *(Fixed in the compiler, on
+  2026-10-10 — see the end of this entry. Kept under "Not done" because the
+  property of this repository it exposed is still true, and the guard that
+  records it is unchanged.)* This was a V master bug, not a Vails one: on
+  `vlang/v` master, `json2.decode[T]` returns a **zero-valued struct with no
+  error** when the module declaring `T` is named `config` **and** `net.http` is
+  linked into the same binary. `cli` imports `dev` (which imports `net.http`),
+  and this repository's config module is named `config`, so `vails doctor`,
+  `vails run`, `vails build` and `vails dts` all reported
+  `vails.json: name must not be empty` on a project whose config was valid.
+
+  Bisected one variable at a time; the full table is in `AGENTS.md` §1b, and the
+  upstream report is [vlang/v#29508](https://github.com/vlang/v/issues/29508).
+  **Two claims had to be withdrawn along the way, and both mattered:**
+
+  - *"the trigger is a cross-module decode"* — refuted by a 2-field struct in a
+    module named `other`, which decodes fine with `net.http` linked.
+  - *"struct complexity is irrelevant"* — refuted in the other direction: the
+    module name is the axis. `conf`, `configx` and `xconfig` all work; `config`
+    does not. So it is the exact identifier, not a prefix rule.
+
+  Two consequences worth stating plainly:
+
+  - **`v test .` was 45/45 green and could not catch this.** Each `_test.v` is
+    its own binary, and no test file imports both `dev` and `config`, so the
+    one combination that breaks was never linked in a test. That is a property
+    of this repository's test layout and it is still true.
+  - **The checked-in `examples/*/frontend/vails.d.ts` files were one release
+    behind the generator**, carrying the blocking-command JSDoc from
+    `services/dts.v` but not in the files themselves. They must not be
+    hand-edited, so the gap was listed rather than patched.
+
+  `buildplan/json2_import_test.v` guards the shape of the exposure — `net.http`
+  keeps exactly one importer, that importer and every `json2.decode`
+  instantiator stay **disjoint**, and `cli` is still where the two meet — so the
+  combination cannot be widened without a red test. It cannot assert the bug
+  itself: a test that reproduces it would pass only while the compiler is broken
+  and would go red on the fix. **It is unchanged by the fix**, because it is
+  about this repository, not about V.
+
+  **Status: gone.** Re-measured 2026-10-10 on V master `ef2ec06` — the same
+  program across three fresh project roots decodes correctly, `vails doctor`
+  reports `vails.json : ok`, and all three example declarations were
+  regenerated with their blocking-command JSDoc. Nine `json2` commits landed
+  between the two builds and **which one fixed it is not bisected**, so it is
+  not attributed here.
 - **`menu.set_menu` is unproven at runtime on Windows.** It compiles and links,
   and the pure-V classifier behind it (`bar_click`) is unit-tested on every
   platform, but the E2E window would not come up in the capture session, so

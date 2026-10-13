@@ -1,7 +1,8 @@
 # ADR-0036 — drag & drop: `WM_DROPFILES`, and what it costs the DOM
 
 Date: 2026-10-03. Status: **accepted; Windows written and unit-tested, not
-observed at runtime. Linux native half deliberately unwritten.**
+observed at runtime. Linux native half written and compiled on 2026-10-10, also
+not observed at runtime** — see the erratum under "The Linux half".
 
 ## Context
 
@@ -87,20 +88,35 @@ not an obstacle here; it is the mechanism.
   `tray.decide` has the name; V rejects the redefinition outright. Same reason
   `validate_tray_options` is not called `validate`.
 
-## Why the Linux half is unwritten
+## The Linux half: written on 2026-10-10, compiled, not proven
 
-It would be a `GtkDropTarget` on the window, reading `drag-data-received` and
-turning `text/uri-list` into paths. It is not written, and the reason is the rule
-AGENTS.md §2 states: **no native code that has never been compiled.** The wave-3
-Linux build broke for four ordinary GTK reasons while being blamed on V
-(ADR-0015), and this repository has no Linux runner, so a `GtkDropTarget` written
-today would be GTK nobody has run.
+> **Erratum, 2026-10-10.** This section originally said the Linux native half was
+> deliberately unwritten, because "this repository has no Linux runner, so a
+> `GtkDropTarget` written today would be GTK nobody has run". Both halves of that
+> are now wrong and the section is rewritten rather than deleted, because the
+> record of what was believed on the day is the only thing that explains why the
+> gap stayed open for as long as it did:
+>
+> - **there is a Linux runner.** `Dockerfile` builds a pinned V from source and
+>   runs the suite 45/45 with GTK C compiled in; `tests/e2e_linux/run_headless.sh`
+>   runs a real app under Xvfb. That has been true since 2026-10-05.
+> - **`GtkDropTarget` was the wrong API name.** It is GTK4. This project is GTK 3.24
+>   (`Dockerfile` asserts the version). The mechanism is `gtk_drag_dest_set` plus URI
+>   target entries plus the `drag-data-received` signal — which is what
+>   `drop_linux.c.v` now implements.
+>
+> The half is **compiled and linked** in the pinned container and `doctor` reports
+> `ok drop` / `7/9 backends native` on Linux. **A human drop has not happened**, and
+> it cannot be faked: `GtkSelectionData` has no public constructor and V cannot
+> express `g_signal_emit_by_name`'s varargs to pass a struct. So there is no
+> `simulate_drop`, and `tests/e2e_linux/README.md` carries six written-out manual
+> steps instead — the refusal-by-name `tray.simulate_click` makes on Linux, for the
+> same reason. Everything below this note describes the design that still holds.
 
-What *is* written is everything that is not native — the bounds, the payload, the
-message policy — all pure V and all tested on **both** platforms. So the Linux gap
-is one function's worth of C, not a service that does not exist, and
-`drop_support()` says "unwritten" rather than "unsupported", because only one of
-those two claims is true.
+The pure-V half — the bounds, the payload, the message policy — is written and
+tested on **both** platforms. The Linux gap was one function's worth of C, never a
+service that did not exist, and `drop_support()` now says the mechanism and the
+trade-off rather than "unwritten", because the claim that is true changed.
 
 The Linux shape is also part of *why* the service is an event rather than a DOM
 dependency: GTK delivers a drop as a selection of URIs on a destination widget,
@@ -136,9 +152,11 @@ that means the same thing on both platforms, exactly as `tray:clicked` and
 - `examples/services` has **no** drop panel yet, and this ADR does not claim one.
   A drop probe needs a human to drag a file, or a shell-level synthesised drop; see
   Verification.
-- Linux `doctor` output now has a second `stub` line whose reason is "unwritten"
-  rather than a missing feature. That is honest, and it is a visible piece of
-  unfinished work in a report that is supposed to be trustworthy.
+- Linux `doctor` output **used to** have a second `stub` line whose reason was
+  "unwritten". That is gone as of 2026-10-10: the line now names the mechanism and
+  carries the DOM trade-off in the same shape Windows does, because the half is
+  written. The stub line was honest *for its day*, and it was also the reason the
+  gap read as finished-by-decision for two releases.
 
 ## Verification
 

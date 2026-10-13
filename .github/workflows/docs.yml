@@ -1,0 +1,165 @@
+# Docs - builds the docs site and publishes it to GitHub Pages.
+#
+# Separate from ci.yml for the two reasons PLAN.md section 7 gives, both of which
+# are properties rather than preferences:
+#
+#   1. it is FAST. An SSG that writes a handful of pages costs seconds, and
+#      paying for the whole V container image to do it wastes runner time;
+#   2. its failure must not redden a green build. A dead link in the docs has no
+#      reason to stop the desktop build, but inside one workflow it would, and a
+#      required check would then hold every PR hostage.
+#
+# The `paths:` filter is what keeps that promise: a docs run happens when docs
+# change, which is also why `CONTEXT.md`, `docs/ADR/**` and `v.mod` are listed -
+# those are the files the site's content is generated FROM.
+
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/site/**'
+      - 'CONTEXT.md'
+      - 'docs/ADR/**'
+      - 'ROADMAP.md'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'v.mod'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/site/**'
+      - 'CONTEXT.md'
+      - 'docs/ADR/**'
+      - 'ROADMAP.md'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'v.mod'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write # required for artifact deployment
+
+concurrency:
+  group: pages
+  # Two concurrent deployments of one branch is meaningless: the second would win
+  # and the first's logs would describe a state that no longer exists.
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # No container. The site is pure-V veb - it compiles no C - so a V with a
+    # vlib is enough, and the GTK/WebKit stack that ci.yml needs is irrelevant
+    # here. Deliberately not folded into the linux job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # V is installed as the official **release asset**, with no action in
+      # between. Three runs were spent getting here, and the third one is why
+      # there is no fourth:
+      #
+      #   1. `oven-sh/setup-v@v2` - the repository no longer exists. The job died
+      #      at step 1 with `Unable to resolve action oven-sh/setup-v,
+      #      repository not found`.
+      #   2. `vlang/setup-v@v1.7` with `version: v0.5.2` - a real git ref, so the
+      #      string looked right and was still wrong. It resolved to a *source*
+      #      download and `make`, which cannot succeed here: the bootstrap
+      #      compiler is newer than 0.5.2 and master has since begun rejecting
+      #      the parenthesised-`if` syntax 0.5.2's own vlib uses
+      #      (`vlib/math/bits/bits.v:621`).
+      #   3. `vlang/setup-v@v1.7` with `version: 0.5.2` - the tag is correct this
+      #      time, and it **still** built from source. The reason is that v1.7
+      #      has no prebuilt path at all: `downloadPrebuilt` was added after
+      #      that tag, so this action installs V by compiling it, forever.
+      #
+      # So there is no version of setup-v that fixes this - not a prefix, not a
+      # pin, not a float. The action is removed rather than reconfigured. V is
+      # fetched as the asset V itself publishes, pinned by checksum, which is
+      # both fewer moving parts and the only one of the three approaches that
+      # was verified to work.
+      #
+      # The version is `0.5.2` with no prefix, because that is how V tags
+      # releases, and it is deliberate rather than default: 0.5.2 is the newest
+      # release and the only one whose vlib this whole repository can build
+      # against without a source-built V (`bridge/` and `state/` import `json2`,
+      # which exists on no release - see the Dockerfile header). The site is the
+      # part of this repository that *does* build on a release, and keeping it
+      # that way is worth an explicit pin.
+      - name: Install V 0.5.2
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/v"
+          url='https://github.com/vlang/v/releases/download/0.5.2/v_linux.zip'
+          sha='86caf9e70c3342d48ef19eb4f6c47b709f18c90ae86255520d5c29df6b482e23'
+          curl -fsSL --retry 3 "$url" -o "$RUNNER_TEMP/v.zip"
+          echo "$sha  $RUNNER_TEMP/v.zip" | sha256sum --check -
+          unzip -q "$RUNNER_TEMP/v.zip" -d "$RUNNER_TEMP"
+          # The asset unpacks to `v/` with the binary at `v/v`, confirmed by
+          # reading the archive rather than assuming the layout.
+          echo "$RUNNER_TEMP/v" >> "$GITHUB_PATH"
+          # ...and also export it for THIS step. Writing $GITHUB_PATH changes the
+          # PATH of *subsequent* steps, not the current one, so the first version
+          # of this block died with `v: command not found` on line 11 - after the
+          # checksum and unzip had both already succeeded, which is why the
+          # failure looked like the install failed and not like one line.
+          export PATH="$RUNNER_TEMP/v:$PATH"
+          v version
+      - name: Build the site (with -prod, so a template error is a build error)
+        # `-prod` compiles veb's templates into the binary, which is the whole
+        # justification for this step: a template error breaks CI rather than a
+        # visitor. It must not be re-justified as "it is faster".
+        #
+        # `working-directory` is load-bearing, not tidiness. veb resolves the
+        # template directory relative to the CURRENT directory, so building from
+        # the repository root fails with `veb HTML template "404.html" not found`
+        # - measured on the run that produced this comment. The static folder and
+        # the export output are resolved from `@FILE` in `buildplan.site_paths`,
+        # so they are unaffected; only the template lookup is CWD-relative.
+        working-directory: docs/site
+        run: v -prod -o site.exe veb_site.v
+      - name: Export the site
+        # A separate step from the build, for two reasons that a combined
+        # `v -prod run` costs you: the build cannot fail the run's failure, and
+        # the `-- --export` argument is not reliably forwarded through `v run`.
+        # The first run that used the combined form sat on a listening server
+        # until the job timed out.
+        #
+        # `working-directory` is here for the same reason as the build's: the
+        # binary is written there, and a previous version of this step ran from
+        # the repository root and failed with exit 127 (`./site.exe: not found`).
+        # The export output itself is resolved from `@FILE` via
+        # `buildplan.site_paths`, so it lands in `docs/site/dist/` either way.
+        working-directory: docs/site
+        run: ./site.exe --export
+      - name: Fail if the export produced nothing
+        # An exporter that "succeeds" with an empty dist/ is a failure this
+        # repository has already had twice - once a 404 body as the home page,
+        # once a dist/ written beside the Dockerfile. buildplan already asserts
+        # the path mapping; this asserts the artifact is actually there.
+        run: |
+          set -eu
+          test -f docs/site/dist/index.html || { echo "::error::no index.html in the export"; exit 1; }
+          test -f docs/site/dist/404.html || { echo "::error::no 404.html in the export"; exit 1; }
+          echo "exported $(find docs/site/dist -name '*.html' | wc -l) HTML file(s)"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/dist
+
+  deploy:
+    # Only on a push to main. A pull request builds and uploads, which proves the
+    # step works, but publishing from a branch would make the published site lag
+    # behind a PR that closes without merging.
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

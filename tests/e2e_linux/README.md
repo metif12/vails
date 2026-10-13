@@ -455,13 +455,20 @@ cd /mnt/d/MyProjects/vails
 VAILS_SERVICES_PROBE=dialog sh tests/e2e_linux/run_services.sh
 ```
 
-![real GtkMessageDialog, answered by the probe, button reported](dialog.png)
+> **There is no committed screenshot for this run, and the image link that used
+> to sit here pointed at nothing.** `tests/e2e_linux/dialog.png` has never existed
+> in this repository — `git log --all -- tests/e2e_linux/dialog.png` returns no
+> commits at all — yet this section and ADR-0027 both cited it as the proof. So
+> the claim below rests on the probe's stdout, not on an image, and it is now
+> worded as what it is. Re-capturing it is a small job on any machine with the
+> GTK stack; until someone does, there is nothing in the repo to check by looking.
 
-- **Fully proven, and provable without a human.** The screenshot shows a real
-  `GtkMessageDialog` that the probe answered from a timer, reporting
-  `button: ok, canceled: false`. So the whole chain is machine-checked:
-  `dialog.message` -> `gtk_message_dialog_new` -> `gtk_dialog_run`'s nested
-  main loop -> `GTK_RESPONSE_OK` -> the shared response mapping -> the page.
+- **Fully proven, and provable without a human — by the probe's report, not by a
+  committed screenshot.** The run reported a real `GtkMessageDialog` answered by
+  a timer from a `g_timeout_add`, reporting `button: ok, canceled: false`. So
+  the whole chain is machine-checked: `dialog.message` -> `gtk_message_dialog_new`
+  -> `gtk_dialog_run`'s nested main loop -> `GTK_RESPONSE_OK` -> the shared
+  response mapping -> the page.
 
   The "last S1 item waiting on a human answering a modal window" was not one.
   A `g_timeout_add` callback scheduled *before* the page's call runs inside the
@@ -548,3 +555,102 @@ cd /mnt/d/MyProjects/vails
   The check to write alongside it is the `post` probe, not a unit test — the
   round trip is only visible in a window.
 
+---
+
+## F1 - drag & drop (`drop` service, ADR-0036) - **compiled, not proven at runtime**
+
+The Linux backend landed on 2026-10-10 (`services/drop_linux.c.v`): a
+`gtk_drag_dest_set` plus URI target entries on `Ctx.toplevel`, and the
+`drag-data-received` signal turning `text/uri-list` into paths through
+`g_filename_from_uri`. It **compiles and links** in the pinned container and the
+services suite is green there. `vails doctor` on Linux now reports
+`ok drop - gtk_drag_dest_set + text/uri-list ...` and `7/9 backends native`, which
+is up from `5/9` when the half was a stub.
+
+What is not proven, and why it is not proven here:
+
+- **A human drop has not happened.** `text/uri-list` arrives with a real drag, and
+  the trick that made the GTK dialog testable - answering a modal from an idle
+  callback - does not transfer, because `GtkSelectionData` has no public
+  constructor and V cannot build one. Measured, not assumed:
+  `gtk_selection_data_new` does not exist in the public headers, and V cannot
+  express `g_signal_emit_by_name`'s varargs to pass a struct anyway
+  (`implicit declaration` on the declared form, and `...` is not a V signature).
+  So this is the same refusal `tray.simulate_click` makes on Linux: no click to
+  manufacture, because a faked gesture would prove a path that does not exist.
+- **There is no `simulate_drop` command, deliberately.** Unlike the tray's click,
+  which `PostMessage` can reproduce, the payload is a struct owned by GTK. Adding
+  the command would either fake the struct or add an API whose only Linux
+  behaviour is refusal - and a service reports events rather than being told what
+  dropped. The pure-V half is what is machine-checked: the bounds (64 paths, 1024
+  chars, NUL rejected), the truncation order, the empty report and the payload
+  round trip are all still tested on both platforms.
+- **The UI is manual, so the steps are written out** rather than left to be
+  rediscovered. They mirror the Windows procedure in
+  `tests/e2e_windows/README.md` (F1) on purpose, so one file's steps can be read
+  against the other's.
+
+### The six manual steps
+
+```sh
+# Prerequisite: a session with a file manager, because this is the half that
+# needs a real drag. dbus-run-session is NOT needed for drop (no tray
+# registration), but a running X or Wayland session is.
+docker run --rm -it vails-ci
+cd /opt/vails
+VFLAGS=-gc none /opt/vlang/v -o /tmp/dropprobe ./examples/services
+
+# 1. grant the capability first. examples/showcase is the E2E vehicle and it
+#    already grants drop (the panel is in the R3/R4 sweep); if you are using
+#    examples/services, add this to its vails.json "windows" entry:
+#      { "id": "drop", "windows": ["main"], "commands": ["drop.enable"] }
+#    An unused grant is not proof the catalog lets drop through - check both.
+cd /opt/vails/examples/showcase   # or examples/services
+
+# 2. run the probe with the display this session owns:
+unset WAYLAND_DISPLAY
+export GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1
+/tmp/dropprobe &
+echo $! > /tmp/drop.pid
+
+# 3. from the page's console, arm the window (needs drop.enable granted above):
+#      await window.vails.drop.enable()
+#    The E2E probe's is_enabled() should now read true - that is the machine-
+#    checkable half, and it runs before any human drag.
+
+# 4. drag ONE .txt or .png file from a file manager onto the window.
+#    Expected: the page receives drop:files with
+#      {"paths":["/home/you/notes.txt"],"count":1}
+#    - a path, not a file:// URI. g_filename_from_uri converted it; if you see
+#      "file:///..." the conversion half regressed.
+#    - the order the selection was made in, for a multi-file drag.
+
+# 5. drag a folder onto the window. Expected: one path, the folder itself,
+#    count 1. The page decides what a directory means (ADR-0015: the service
+#    reports, it does not act).
+
+# 6. drag text from a browser instead. Expected: nothing arrives, because only
+#    text/uri-list is targeted, and GTK refuses a URI that is not a local file.
+#    A phantom drop with an empty paths array would be the bug this step
+#    catches - drop_files_data on an empty list is an empty report, not a
+#    missing one, and only a real drag distinguishes them.
+```
+
+### What to record when someone runs it
+
+The same shape `tests/e2e_linux/README.md` uses for the other proofs, so the
+screenshot is not the claim - the claim is the text of the event:
+
+```
+drop:files  ->  {"paths":["/home/<you>/notes.txt"],"count":1}
+drop:files  ->  {"paths":["/home/<you>/Pictures"],"count":1}
+(drag text)  ->  no drop:files
+```
+
+`examples/showcase` does not yet have a drop panel (it is in the R3/R4 sweep), so
+until then this is console calls from `examples/services` - the same position the
+Windows half is in, and the same reason to say so rather than describe it as done.
+
+**Compiled and linked in the pinned container; the six steps above are the only
+thing standing between this and "proven".** That is the whole claim, and it is
+written here rather than in `AGENTS.md` because it is a procedure, not a rule.

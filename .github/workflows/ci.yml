@@ -74,72 +74,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install V
-        # THE PINNED RELEASE ZIP, NOT winget. `winget install --id=VLang.V`
-        # fails with "No package found matching input criteria" - there is no
-        # such package in the winget source (measured 2026-10-05, and reproduced
-        # against the runner's own `winget search VLang`, which returns nothing).
-        #
-        # Downloading the release is better than winget would have been anyway,
-        # for a reason that is not about winget: it PINS the compiler. Every
-        # other flag in this job is justified against a specific V - the
-        # `-ldflags "-lws2_32"` below is needed on 0.5.2 and unnecessary on
-        # master - so "whatever winget had this morning" made those comments
-        # untrue by construction. 0.5.2 is pinned to match them.
-        #
-        # It also does not depend on MSYS2, which the next step installs, and
-        # that constraint is unchanged from the winget version: V's own `make`
-        # on Windows is not what this job is here to test.
-        run: |
-          $ver = '0.5.2'
-          $zip = Join-Path $env:RUNNER_TEMP 'v_windows.zip'
-          $dest = Join-Path $env:RUNNER_TEMP 'vlang'
-          Invoke-WebRequest -Uri "https://github.com/vlang/v/releases/download/$ver/v_windows.zip" -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $dest -Force
-          # The archive contains a top-level `v/` directory, so v.exe and vlib/
-          # end up as SIBLINGS inside it: $dest\v\v.exe and $dest\v\vlib\.
-          # Putting $dest\v on PATH is therefore what makes `v` resolve.
-          $vbin = Join-Path $dest 'v'
-          "$vbin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: This compiler can build this repo
-        # A smoke step, and it exists because of a measured failure mode rather
-        # than a hypothetical one: `bridge/` and `state/` import `json2`, and a V
-        # install whose vlib has no `json2` fails with
-        #   builder error: cannot import module "json2" (not found)
-        # which reads like a missing dependency in this repo and is not one. On
-        # 2026-10-03 BOTH V installs on the machine that could have built it were
-        # affected in one way or another (one lacked json2, the other needed
-        # -enable-globals). A version check here turns "CI is red for a reason
-        # nobody can see" into one line of output.
-        #
-        # ONE Split-Path, not two, and the reason is the layout: v.exe sits in
-        # the same directory as vlib/ (the step above puts $dest\v on PATH), so
-        # one level up from v.exe IS the vroot. The previous two-level form was
-        # only correct for a layout where v.exe lives in a bin/ beside vlib/, and
-        # it happened to pass on the machine this was written on purely because
-        # that machine's `v` is a .bin\v.bat forwarder - which is exactly the
-        # kind of coincidence that stops being true on a fresh runner.
-        run: |
-          v version
-          $vroot = Split-Path (Get-Command v).Source
-          if (-not (Test-Path (Join-Path $vroot 'vlib\json2'))) {
-            Write-Error "no vlib\json2 under $vroot - bridge/ and state/ import json2, so this V cannot build this repo. Pinned V version is 0.5.2; a newer V has it (see AGENTS.md 1b)"
-            exit 1
-          }
-          Write-Output "json2 present under $vroot"
-
       - name: Install MSYS2 ucrt64 + the webview packages
+        # MOVED TO THE TOP, and that move is the whole fix for this job's
+        # long-standing red state.
+        #
+        # It used to sit after `Install V`, because V was installed as the
+        # 0.5.2 release zip and that zip needs no C compiler to unpack. But
+        # 0.5.2 has no `json2` in its vlib - `json2` was added to vlang/v on
+        # 2026-10-03, which is after every published tag - so `bridge/` and
+        # `state/` could not compile, and the smoke step below failed with
+        # `no vlib\json2`. AGENTS.md 1b named the only fix that works: build V
+        # from source at a pinned commit, with MSYS2 installed BEFORE it
+        # because V's own Windows build needs a C compiler.
+        #
+        # So the order is now the one that constraint forces: toolchain first,
+        # compiler second. The same pinned commit the Dockerfile builds, so
+        # the two CI platforms compile against the same V rather than against
+        # two different ones that happen to agree.
         run: |
           choco install msys2 -y --no-progress
           C:\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-webview mingw-w64-ucrt-x86_64-webview2-loader"
 
       - name: Put ucrt64 on PATH
-        # A separate step, and after the install, because ADR-0005's rule
-        # is about EVERY later step: without C:\msys64\ucrt64\bin on PATH
-        # even `cc1` cannot find its own DLLs, which fails as a SILENT gcc
-        # failure rather than a missing-symbol error. GITHUB_PATH only
-        # affects subsequent steps, which is exactly the scope wanted.
+        # Before the V build, not just before the tests. ADR-0005's rule is
+        # about EVERY later step: without `C:\msys64\ucrt64\bin` on PATH even
+        # `cc1` cannot find its own DLLs, which fails as a SILENT gcc failure
+        # rather than a missing-symbol error - and a V built by a cc1 that
+        # could not load is a V that fails later for a reason nobody can see.
+        # GITHUB_PATH only affects subsequent steps, which is exactly the
+        # scope wanted.
+        #
         # SINGLE quotes, and they are load-bearing. A YAML double-quoted scalar
         # processes backslash escapes, and `\m` is not one - so the double-quoted
         # form of this line was not valid YAML at all. GitHub rejects the whole
@@ -151,20 +115,101 @@ jobs:
         run: |
           'C:\msys64\ucrt64\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: v test .
-        # The `-ldflags` is not optional **on V 0.5.2**, which is what the winget
-        # step above installs, and the reason is a V bug rather than a repo one:
-        # V 0.5.2's `dependency_scan_fallback` link path emits `#flag`-sourced
-        # `-l` flags BEFORE most object files, and GNU ld only resolves an archive
-        # against the objects that precede it, so `net.http`'s `ws2_32` never
-        # resolves. It has to arrive as `-ldflags`, which is emitted last.
+      - name: Build V from source at the pinned commit
+        # THE PIN, and why it is a commit rather than a tag.
         #
-        # It is also unnecessary on a newer V, measured 2026-10-03 across 33 test
-        # files on V master — so the flag is here because of the compiler this job
-        # pins, not because the repo needs it. See AGENTS.md 1 and 1b.
+        # A tag cannot work: no published release contains `json2`. vlang/v
+        # added it on 2026-10-3, every release predates that, and
+        # `bridge/` + `state/` import it - so `v test .` fails with
+        # `builder error: cannot import module "json2" (not found)`. Measured
+        # against the API's own answer rather than assumed: `gh api
+        # repos/vlang/v/contents/vlib/json2?ref=7647ce1` returns 404, while
+        # the same query at the pinned commit returns the module.
+        #
+        # The commit is the SAME one the Dockerfile builds, so the Linux and
+        # Windows jobs compile this repository against one compiler rather
+        # than two. Bump it in both places together.
+        #
+        # `makev.bat -gcc` is V's own Windows build command - it is the first
+        # thing `vlang/v`'s `windows_ci_gcc.yml` runs after checkout, so this
+        # is the recipe V itself validates on a runner rather than one invented
+        # here. The fetch-by-SHA form is used because a shallow clone's HEAD is
+        # not the pinned commit, and GitHub serves any reachable commit that
+        # way.
+        #
+        # `v symlink` is V's own next step and is kept: `v` resolves its own
+        # vlib relative to the executable, and this is the binary that step
+        # leaves on PATH.
+        run: |
+          $sha = '60542b9904a3a0102575ec1104e548996f650a83'
+          $src = Join-Path $env:RUNNER_TEMP 'vsrc'
+          if (Test-Path $src) { Remove-Item $src -Recurse -Force }
+          git init -q $src
+          git -C $src remote add origin https://github.com/vlang/v.git
+          git -C $src fetch --depth 1 origin $sha
+          if ($LASTEXITCODE -ne 0) { throw "could not fetch V at $sha" }
+          git -C $src checkout -q FETCH_HEAD
+          Push-Location $src
+          .\makev.bat -gcc
+          if ($LASTEXITCODE -ne 0) { throw "makev.bat failed with exit code $LASTEXITCODE" }
+          .\v.exe version
+          .\v.exe symlink
+          if ($LASTEXITCODE -ne 0) { throw "v symlink failed with exit code $LASTEXITCODE" }
+          Pop-Location
+          "$src" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: This compiler can build this repo
+        # A smoke step, and it exists because of a measured failure mode rather
+        # than a hypothetical one: `bridge/` and `state/` import `json2`, and a V
+        # install whose vlib has no `json2` fails with
+        #   builder error: cannot import module "json2" (not found)
+        # which reads like a missing dependency in this repo and is not one.
+        #
+        # This step is what turned that into a readable failure while the job
+        # was pinned to 0.5.2, and it is kept now that the job builds from
+        # source - a green line here is the cheapest possible proof that the
+        # pinned commit is the one the job thinks it is.
+        #
+        # ONE Split-Path, not two, and the reason is the layout: v.exe sits in
+        # the same directory as vlib/ (the step above puts the source root on
+        # PATH), so one level up from v.exe IS the vroot. The previous two-level
+        # form was only correct for a layout where v.exe lives in a bin/ beside
+        # vlib/, and it happened to pass on the machine this was written on
+        # purely because that machine's `v` is a .bin\v.bat forwarder - which is
+        # exactly the kind of coincidence that stops being true on a fresh
+        # runner.
+        run: |
+          v version
+          $vroot = Split-Path (Get-Command v).Source
+          if (-not (Test-Path (Join-Path $vroot 'vlib\json2'))) {
+            Write-Error "no vlib\json2 under $vroot - bridge/ and state/ import json2, so this V cannot build this repo. The pinned commit should have it (see AGENTS.md 1b)"
+            exit 1
+          }
+          Write-Output "json2 present under $vroot"
+
+      - name: v test .
+        # The `-ldflags` is kept, and the reason it is kept is that it is
+        # VERSION-SCOPED rather than needed here. On V 0.5.2 it was not
+        # optional, because of a V bug rather than a repo one: 0.5.2's
+        # `dependency_scan_fallback` link path emits `#flag`-sourced `-l` flags
+        # BEFORE most object files, and GNU ld only resolves an archive against
+        # the objects that precede it, so `net.http`'s `ws2_32` never resolves.
+        # It has to arrive as `-ldflags`, which is emitted last.
+        #
+        # It is unnecessary on a newer V, measured 2026-10-03 across 33 test
+        # files on V master - and this job now pins master, so the flag is not
+        # doing any work. It stays because a command that works on both
+        # compilers is worth more than one that is minimal on the compiler we
+        # happen to pin this month: `buildplan.cli_flags` still emits it for
+        # exactly that reason, and the test that asserts it is what documents
+        # that it exists on purpose. Removing it means also removing the
+        # assertion, which turns a version difference into a mystery again.
         run: v -cc gcc -ldflags "-lws2_32" test .
 
       - name: build the CLI
+        # The `-cflags` on this step is the same story as the `-ldflags` above:
+        # needed on 0.5.2, unnecessary on the master this job pins, kept so one
+        # command serves both and `buildplan.cli_flags` stays truthful.
         run: v -cc gcc -cflags "-Wno-incompatible-pointer-types" -ldflags "-lws2_32" -o vails.exe ./cli
 
       - name: vails build produces a RUNNABLE binary

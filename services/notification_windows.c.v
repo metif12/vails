@@ -53,7 +53,23 @@ fn is_supported_native() bool {
 // frontend-facing question, and a runtime probe behind it would make a
 // compile-time fact impure (and cost a native call per frontend check).
 // `vails doctor` is where a machine-specific answer belongs.
-pub fn toast_available() bool {
+//
+// **Private, and it used to be the only `pub fn` in any of the 24 `.c.v`
+// files.** That is not a style note: a `pub` in a platform-suffixed file makes
+// the `services` module's public API differ per platform, so `services.X` is a
+// name that exists on Windows and not on Linux — the exact shape of the bug
+// class that stopped the whole module compiling on Linux on 2026-10-05
+// (`drop.v` calling a Windows-only function from platform-neutral code). The
+// repo's own rule is that platform code stays behind a neutral facade, and the
+// neutral door for this question is `notification_support()`, which reaches the
+// same capability through `toast_failure_reason()`.
+//
+// It is kept, private, rather than deleted because `support_test.v` uses it as
+// the independent half of a cross-check: `notification_support().ready ==
+// toast_available()` asserts that the newer reason-code probe and the older
+// direct bool probe still agree about this machine. That is worth having, and
+// it does not require the function to be public — the test is in this module.
+fn toast_available() bool {
 	unsafe {
 		return C.vails_toast_available() == 1
 	}

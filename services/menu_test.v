@@ -258,6 +258,73 @@ fn cmd(wparam u64) webview.HostEvent {
 	}
 }
 
+// A bar that cannot be hooked must FAIL, not quietly do nothing.
+//
+// This is the regression guard for a swallowed failure. `attach_bar_hook` used to
+// catch the `webview.attach` error, `eprintln` it and return normally, so
+// `menu.set_menu` resolved `ok` on a window whose bar was attached and had nothing
+// listening — a dead menu bar with no error anywhere, while `tray` and `drop`
+// propagated the identical failure from the identical call. The comment above the
+// old `eprintln` even claimed the opposite ("the whole command fails: the caller
+// learns"), so the code and its own stated contract disagreed.
+//
+// It is testable WITHOUT a window on Windows because `webview.attach` rejects a
+// parentless `Ctx` before it reaches any `$if` — the check is `ctx.has_parent()`,
+// not the platform. So this needs no HWND, which is the only reason it is an
+// assertion here rather than a note in the E2E README.
+//
+// The `$if windows` is nonetheless required, and the reason is worth stating
+// because it is the more common way this guard gets lost: `webview.attach` is
+// cross-platform, but `attach_bar_hook` — the function under test — is not. It
+// lives in `menu_windows.c.v`, so a "both platforms" test naming it does not
+// merely skip on Linux, it fails to compile. The cross-platform half of the same
+// contract is asserted by `test_set_menu_refuses_a_window_it_cannot_hook` below,
+// which goes through `set_menu`, and both backends gate on the window first.
+//
+// What this does NOT cover, stated plainly so the guard is not over-read: a
+// `SetWindowSubclass` failure on a real HWND still cannot be reached from a unit
+// test, so the native half of this failure mode is argued in the comment on
+// `attach_bar_hook` and proven by the menu E2E run, not asserted here.
+$if windows {
+	fn test_a_bar_that_cannot_be_hooked_fails_the_command() {
+		mut st := &MenuState{
+			ctx: webview.Ctx{
+				label: 'main'
+			}
+		}
+		mut why := ''
+		attach_bar_hook(mut st) or { why = err.msg() }
+		assert why.contains('menu.set_menu')
+		assert why.contains('hook')
+		// And nothing was half-installed: a nil hook is what makes the caller's
+		// `or` branch safe to run, because it destroys the orphan HMENU knowing no
+		// seam will ever read it.
+		assert st.bar_hook == unsafe { nil }
+		assert st.bar_handle == unsafe { nil }
+	}
+}
+
+// The hook is installed BEFORE the bar is handed to the window, and this is the
+// pure-V half of why: a `menu.set_menu` that reaches the native layer with no
+// window must fail, so no HMENU is ever attached to a window whose seam is
+// missing. (The ordering itself is in `set_menu_native` and needs a real HWND;
+// what is checkable here is that the command refuses rather than half-succeeding.)
+fn test_set_menu_refuses_a_window_it_cannot_hook() {
+	mut st := &MenuState{
+		ctx: webview.Ctx{
+			label: 'main'
+		}
+	}
+	mut why := ''
+	set_menu(mut st, [MenuItem{
+		id:    'file'
+		label: 'File'
+	}]) or { why = err.msg() }
+	assert why != ''
+	assert st.bar_handle == unsafe { nil }
+	assert st.bar_hook == unsafe { nil }
+}
+
 fn test_bar_click_maps_a_command_id_back_to_its_item() {
 	ids := bar_ids_fixture()
 	// 1-based, because 0 is reserved for "no command" on Windows and for "no

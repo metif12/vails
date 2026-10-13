@@ -234,32 +234,30 @@ pub fn drop_files_data(paths []string) string {
 	return '{"paths":[' + items.join(',') + '],"count":' + paths.len.str() + '}'
 }
 
-// on_drop_message is the handler the window seam calls. A plain function (not a
-// closure) so the install site reads the same on every platform.
+// ## Where the message handler lives, and why it is not in this file
 //
-// It consumes exactly the messages `decide` says are the drop's, and it reads
-// the DROPFILES handle on none other. Reading lParam as an HDROP for a message
-// that is not WM_DROPFILES would hand the shell API a pointer to whatever the
-// message's lParam happened to be, so `is_drop_message` is asked first and the
-// question is not "was it a drop" but "whose handle is this".
+// `on_drop_message` used to be here, and it could not be: the one thing it does
+// that this file cannot is read an HDROP, and `read_dropped_paths_native` exists
+// only in `drop_windows.c.v`. A platform-neutral module may not name a platform
+// function at all, so this was not one broken function - it was the whole `services`
+// module failing to compile on Linux.
 //
-// A failed emit fails the handler, which the host treats as consumed: a drop the
-// frontend never hears about is a drop the user is still holding files for, and
-// there is nothing useful to pass on to a window procedure that does not know
-// what a DROPFILES handle is.
-fn on_drop_message(st &DropState, e webview.HostEvent) !bool {
-	if decide_drop(e, 0) == .pass_on {
-		return false
-	}
-	// The native read releases the handle as part of reading it, on every path
-	// including an error - an unreleased HDROP is a shell resource leak per drop,
-	// and a drop is something a user can do a hundred times an hour.
-	paths := read_dropped_paths_native(e.lparam) or {
-		return error('drop: could not read the dropped paths: ' + err.msg())
-	}
-	st.ctx.emit(event_drop_files, drop_files_data(validate_dropped_paths(paths)))!
-	return true
-}
+// It lives in `drop_windows.c.v` now, beside its only caller and its only platform
+// dependency. `menu_windows.c.v`'s `on_bar_command` is the same arrangement for the
+// same reason: a handler that reads a Windows message belongs to that platform's
+// backend.
+//
+// `tray.v` looks like the counter-example and is not. Its `on_host_message` can
+// stay neutral because a tray backend *exists on Linux*, so there is a message to
+// handle on both sides. The drop service has no Linux half by choice (see
+// `drop_linux.c.v`), so a neutral handler would have nothing to be neutral about.
+//
+// Everything testable stayed here on purpose. `decide_drop`,
+// `validate_dropped_paths` and `drop_files_data` are the entire policy, all three
+// are pure V, and all three stay covered on both platforms by `drop_test.v`. What
+// moved is the one function that needs an HDROP - and so cannot be tested on a
+// machine without one, which is the honest reason it was the wrong side of the
+// line to begin with.
 
 // enable_drop starts accepting drops on this window and installs the seam.
 //
@@ -341,18 +339,21 @@ pub fn drop_support() ServiceStatus {
 				'WebView2 child'
 		}
 	} $else $if linux {
-		// Not a stub by accident: the GTK half is a GtkDropTarget on the window,
-		// and writing GTK C that has never been compiled is how the wave-3 Linux
-		// build broke for four ordinary reasons while being blamed on V
-		// (ADR-0015). The pure-V half - the bounds, the payload, the policy -
-		// is written and tested on both platforms, so only the native read is
-		// missing.
+		// Written on 2026-10-10, and written against the container rather than
+		// against a hope: see drop_linux.c.v's header for why the old reason for
+		// not writing it ("no Linux runner here") expired, and for the two API
+		// mistakes that cost a build.
+		//
+		// The note names the mechanism and the trade-off, in the same shape
+		// Windows carries it: GTK reports a drop as an event, so the page gets
+		// `drop:files` and not the DOM's dragover/drop. A support line that said
+		// only the mechanism would be an over-read in the other direction.
 		return ServiceStatus{
 			name:  'drop'
-			ready: false
-			note:  'the GTK drop-target half is unwritten (no GtkDropTarget yet - ' +
-				'ADR-0015 lesson: no native code that has never compiled); the ' +
-				'bounds, the payload and the policy are done'
+			ready: true
+			note:  'gtk_drag_dest_set + text/uri-list on the toplevel, which ' +
+				'reaches the page as drop:files and not the DOM drop events; the ' +
+				'bounds, the payload and the policy are the same pure V Windows uses'
 		}
 	} $else {
 		return ServiceStatus{

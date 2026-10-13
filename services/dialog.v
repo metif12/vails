@@ -451,9 +451,15 @@ pub fn install_dialog(mut router bridge.Router, ctx webview.Ctx) ! {
 }
 
 // dialog_support answers "can this platform show a file picker?" (see
-// support.v). The Linux half is still a stub even though the toolchain now
-// exists: the GTK chooser is the last S1 item waiting on a human answering a
-// modal window, and it is scheduled in Phase 5b.
+// support.v).
+//
+// This function used to say the Linux half was a stub and scheduled it in
+// Phase 5b. Phase 5b then landed the backend (ADR-0027, `dialog_linux.c.v`),
+// and this line was not updated - which made `vails doctor` report
+// `stub dialog` on a machine with a real GTK chooser compiled in and tested,
+// for two releases. `support_test.v` pinned it, so nothing failed. A green
+// check asserting something false is the §2c failure at service scale, and the
+// reason the note now names the backend rather than a phase.
 pub fn dialog_support() ServiceStatus {
 	$if windows {
 		return ServiceStatus{
@@ -464,8 +470,8 @@ pub fn dialog_support() ServiceStatus {
 	} $else $if linux {
 		return ServiceStatus{
 			name:  'dialog'
-			ready: false
-			note:  'stub: the GTK chooser lands in Phase 5b'
+			ready: true
+			note:  'GtkFileChooserDialog + GtkMessageDialog (gtk_dialog_run spins a nested main loop - the ADR-0014 blocking exception, so a handler may park here)'
 		}
 	} $else {
 		return ServiceStatus{

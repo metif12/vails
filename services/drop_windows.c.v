@@ -86,13 +86,42 @@ const drop_buffer_units = max_dropped_path_len + 1
 // An arm with no hook is also what makes `drop.enable` idempotent: the second
 // call finds the hook present, re-arms the window (harmless - DragAcceptFiles is
 // a set, not a counter) and returns, rather than stacking a second subclass.
+// on_drop_message is the handler the window seam calls. A plain function (not a
+// closure) so the install site reads the same on every platform that has one.
+//
+// It lives in this file rather than in `drop.v` because it reads an HDROP, and
+// `drop.v` is platform-neutral and may not name a platform function: keeping it
+// there made the entire `services` module fail to compile on Linux. `drop.v`
+// carries the full note on why that split falls where it does.
+//
+// It consumes exactly the messages `decide_drop` says are the drop's, and it reads
+// the DROPFILES handle on none other. Reading lParam as an HDROP for a message
+// that is not WM_DROPFILES would hand the shell API a pointer to whatever the
+// message's lParam happened to be, so `is_drop_message` is asked first and the
+// question is not "was it a drop" but "whose handle is this".
+//
+// A failed emit fails the handler, which the host treats as consumed: a drop the
+// frontend never hears about is a drop the user is still holding files for, and
+// there is nothing useful to pass on to a window procedure that does not know
+// what a DROPFILES handle is.
+fn on_drop_message(st &DropState, e webview.HostEvent) !bool {
+	if decide_drop(e, 0) == .pass_on {
+		return false
+	}
+	// The native read releases the handle as part of reading it, on every path
+	// including an error - an unreleased HDROP is a shell resource leak per drop,
+	// and a drop is something a user can do a hundred times an hour.
+	paths := read_dropped_paths_native(e.lparam) or {
+		return error('drop: could not read the dropped paths: ' + err.msg())
+	}
+	st.ctx.emit(event_drop_files, drop_files_data(validate_dropped_paths(paths)))!
+	return true
+}
+
 fn enable_drop_native(mut st &DropState) ! {
 	require_parent(st.ctx, 'drop.enable')!
 	if st.hook == unsafe { nil } {
-		// `owner` rather than `st` in the capture: V 0.5.2 types a closure
-		// capture of a `mut` pointer *parameter* as a pointer to the pointer and
-		// gcc rejects the generated assignment. A plain local captures correctly -
-		// the same workaround as set_tray_native, for the same reason.
+		// `owner`, not `st`: see webview.attach's "One caller-side rule".
 		owner := st
 		hook := webview.attach(st.ctx, fn [owner] (e webview.HostEvent) !bool {
 			return on_drop_message(owner, e)!

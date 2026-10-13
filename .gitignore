@@ -24,8 +24,16 @@ libgcc_s_seh-*.dll
 libstdc++-*.dll
 libwinpthread-*.dll
 
-# OS / editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
+# Docs site build output (`PLAN.md` §7 decision 2: the generated site is an
+# artifact, not source. Committed dist/ would mean the generated HTML is reviewed
+# as if it were written, which is the "generated file that everyone edits"
+# failure `examples/*/frontend/vails.d.ts` already guards against with a header.)
+docs/site/dist/
+
+# V's own build scratch for the site binary, which appears next to the source
+# rather than in a build directory when the site is compiled in place. The
+# directory name carries a timestamp, so it is a fresh one every build and
+# `git status` never stops listing it. The lesson it cost: `git add -A` on this
+# repository stages ~150 object files from a build nobody meant to commit.
+docs/site/.site.exe.*
+docs/site/site.exe

@@ -7,16 +7,66 @@ current position, then what has shipped, then the priority table that decides
 what happens next. Anything about *why* something took three attempts belongs in
 an ADR, not here.
 
-## Where we are (2026-10-04)
+## Where we are (2026-10-10)
 
 | | |
 |---|---|
-| `v test .` on Windows | **37/37 test files green**, excluding `webview` (below). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. Re-measured 2026-10-04 across all 16 non-webview modules. |
-| `v test webview` on Windows | **cannot be run**: it takes the host down. Measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with **no OOM in the Windows event log**. All six `webview` test files *compile* (`v -o`, no run). |
-| `v test .` on Linux | **20 of 43 test files FAIL** — measured 2026-10-05 in the CI container, the first time this has ever been run. `webview` (6 files) **compiles and runs** here, which is the coverage Windows cannot give, and it finds 7 distinct errors in `webview_linux.c.v`. `services/drop.v:257` calls `read_dropped_paths_native`, which exists only on Windows, so the module does not compile at all. `buildplan_test.v` expects `-cc gcc` in the app flags and Linux does not emit it. |
-| Current phase | **Phase 5** (services) — S1 waves 1–4 and Phase 5b shipped |
-| Next by the table | **CI runs now** (below). Next: the 20 Linux failures, then F1, then W1–W4 |
+| `v test .` on Windows | **45/45 test files green, `webview` included** — measured 2026-10-05. The claim in the row below turned out to be stale. No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. |
+| `v test webview` on Windows | **green as of 2026-10-05** — all six `webview` files compile *and* run, twice, inside a full `v -cc gcc test .` (45/45). This contradicts the measurement recorded here until today: **"cannot be run: it takes the host down"**, measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with no OOM in the Windows event log. **What changed is not known**: the tests needed no editing to pass, and the compiler is the same 0.5.2 master as both earlier measurements. So treat this as *currently green*, not *fixed* — if it starts taking the host down again, this row is the history and the F0 work since 2026-10-03 is the first thing to suspect. |
+| `v test .` on Linux | **45/45 test files green** — measured 2026-10-05 in the CI container, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. |
+| Current phase | **Phase 5** (services) — **S1 waves 1–4 and Phase 5b closed as code on 2026-10-10.** S2 (system services) is the next wave in this phase; S3 after it. What the phase's closure does *not* claim is a human runtime proof, and each unproven path is named in "What is claimed and what is proven" |
+| Next by the table | **S2 system services**, then the W-track's W1–W4 (frameless chrome + a `window` service, 6 d) — note what W1–W4 needs: native C interop on two platforms and a human to drag a window edge, so it is not a session of work |
+| **Build-blocked on** | *nothing. The `vails.json` blocker that sat here on 2026-10-05 was a V master bug and stopped reproducing once V moved to `ef2ec06`; AGENTS.md §1b records the whole thing, including why the guard stays.* |
 | Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
+
+**THE CLI CANNOT READ `vails.json`, AND `v test .` CANNOT SEE IT.** Found
+2026-10-05 while trying to regenerate the examples' `.d.ts` files, which had
+been quietly impossible since the move to V master. Every config-consuming
+command fails on a perfectly valid project:
+
+```
+vails doctor   ->   vails.json : INVALID (vails.json: name must not be empty)
+```
+
+`vails doctor`, `vails run`, `vails build` and `vails dts` are all
+affected, so this is not one command's bug: it is the dev server's `import dev`
+(which pulls in `net.http`) poisoning `json2.decode` for the whole binary. The
+full bisection table and a two-import minimal reproduction are in **AGENTS.md
+§1b**.
+
+**The trigger is two specific conditions, and two earlier versions of this note
+were wrong about it.** "`json2` + `net.http`" is not enough — decoding a 2-field
+struct with `net.http` works, and so does decoding a struct that is a
+field-for-field copy of `VailsConfig`. What breaks is a decode of a type declared
+in a module named **`config`**, in a binary that links `net.http`. Two controls
+pin it: removing `net.http` makes it pass, and renaming the module to `other`
+makes it pass. `conf`, `configx` and `xconfig` all work, so it is the exact
+identifier rather than a prefix rule. `time` and `sync` do not trigger it;
+`net.http` does, and merely being *linked* is enough even unused.
+
+Three things worth remembering about it:
+
+- **It returns a zero-valued struct and no error.** So the complaint is about a
+  field that was never read ("name must not be empty"), which sends you looking
+  at the config file instead of at the decoder. Every config in this repo is
+  valid — verified by reading them, not assumed. The primitive is `json2.decode`
+  itself: a direct `json2.decode[config.VailsConfig]` in a binary with
+  `net.http` returns an empty name with no error at all, which is worse than
+  the CLI symptom, because nothing downstream is in a position to catch it.
+- **`v test .` is 45/45 green and structurally cannot catch it**, because each
+  `_test.v` is its own binary and **no test file imports both `dev` and
+  `config`**. Same lesson as `workflow_test.v` and `bom_test.v`, one level up:
+  the suite is green and the property it appears to cover is exercised nowhere.
+- **It is upstream, and it is gone.** `json2` was three days old on `vlang/v`
+  master when this bit. Filed as
+  [vlang/v#29508](https://github.com/vlang/v/issues/29508) with the module-name
+  sweep as the evidence; **closed as fixed**, because on 2026-10-10 the same
+  program on V master `ef2ec06` decoded correctly and `vails doctor` reported
+  `vails.json : ok` again. Nine `json2` commits landed between the two builds
+  and **which one fixed it was never bisected**, so do not attribute it. The
+  guard in `buildplan/json2_import_test.v` stays regardless, because it is
+  about this repository's test layout: it makes the next one visible at review
+  time rather than at `vails doctor` time.
 
 **CI NOW RUNS JOBS.** On 2026-10-05 this stopped being a claim. Two distinct
 causes had been producing the identical "0s, zero jobs" symptom, and only the
@@ -63,27 +113,61 @@ array") and it exists **only on `master`**. Checked and confirmed: not in tag
 it. It lives at `vlib/json2`, not `vlib/v/json2`, which is why a `vlib/v`
 listing looks like it is missing.
 
-So the Windows job **cannot** be pinned to a release, which is the opposite of
-what pinning was supposed to buy, and it means the `-ldflags "-lws2_32"` comment
-in `ci.yml` is describing a version that cannot get as far as needing it. The
-only correct pin is a **vlang/v commit**, which means building V from source on
-the runner — the same thing the Linux container already does successfully. That
-is a real restructure of the windows job (MSYS2 has to be installed *before* V,
-because V's own Windows build needs a C compiler), and it is not done.
+So the Windows job **could not** be pinned to a release, which is the opposite of
+what pinning was supposed to buy, and it meant the `-ldflags "-lws2_32"` comment
+in `ci.yml` was describing a version that could not get as far as needing it. The
+only correct pin was a **vlang/v commit**, which means building V from source on
+the runner — the same thing the Linux container already does successfully — and
+that required a real restructure of the windows job, because MSYS2 has to be
+installed *before* V (V's own Windows build needs a C compiler).
 
-What is true right now, precisely: **CI runs jobs; the Windows job installs a
-compiler that provably cannot build this repo, and says so in one named line
-instead of failing obscurely two steps later.** That is the smoke step working
-as designed, on a machine nobody had ever run it on.
+**That restructure is done, on 2026-10-11.** The windows job now:
 
-**Which means the Linux backlog is now visible, and it is large.** 20 failing
-files is not a list of flaky tests: `webview/webview_linux.c.v` has seven
-distinct compile errors (two undeclared C functions, a `string`/`&char`
-mismatch, four `mut` errors), `services/drop.v` references a Windows-only
-function from platform-neutral code so the whole module fails, and
-`buildplan_test.v` asserts a flag shape Linux does not produce. Every one of
-these was shipped with the Linux side marked "stale, treat as was-green", and
-stale was the correct word: nobody had run it.
+1. installs MSYS2 ucrt64 **first**, and puts `ucrt64\bin` on PATH, because
+   `makev.bat -gcc` needs a working `cc1` and a cc1 that cannot load its own DLLs
+   fails as a silent gcc error rather than as a missing symbol;
+2. fetches V at the **same pinned commit the Dockerfile builds**
+   (`60542b9904a3a0102575ec1104e548996f650a83`), so the two CI platforms compile
+   this repository against one compiler instead of two that merely happen to
+   agree;
+3. builds it with `makev.bat -gcc` — V's own Windows build command, the first
+   thing `vlang/v`'s `windows_ci_gcc.yml` runs after checkout, so it is the
+   recipe V validates on a runner rather than one invented here.
+
+The `-ldflags` and `-cflags` stay in the job, and they stay for a reason that
+survived the restructure: they are **version-scoped**, needed on 0.5.2 and
+unnecessary on the master now pinned, and a command that works on both compilers
+is worth more than one that is minimal on whichever we happen to pin this month.
+`buildplan.cli_flags` still emits them for exactly that reason, and the test
+asserting them is what documents that they exist on purpose.
+
+What is true right now, precisely: **both jobs build against a pinned V-from-source
+compiler, and the Windows smoke step that used to fail on a release V now checks
+the pinned commit it is actually testing against.** The `json2` check is kept as
+the cheapest possible proof that the pin is the one the job thinks it is.
+
+**And the Linux backlog that became visible is now closed: 44 of 44 green.** It
+began as 20 failing files, which is not a list of flaky tests but three distinct
+compilation defects, all shipped with the Linux side marked "stale, treat as
+was-green": `webview/webview_linux.c.v` had seven compile errors (two undeclared
+C functions, a `string`/`&char` mismatch, four `mut` errors), `services/drop.v`
+referenced a Windows-only function from platform-neutral code so the *whole*
+module failed, and `buildplan_test.v` asserted a flag shape Linux does not
+produce. Stale was the correct word for all three: nobody had run it.
+
+The fix is only interesting because of what it turned up on the way. The third one
+was not a bad assertion — it was `app_flags` reading the **host** OS instead of
+its `target` argument, so a Windows build plan could only ever be checked on a
+Windows machine. That is the exact half-checking that taking `Target` as a
+parameter exists to prevent, and the test written to catch it had been passing on
+Windows the whole time, because on Windows it cannot fail. **A platform-specific
+green is not a green**; it is a check that has never been exercised. The other
+two are the ordinary lesson repeated: the Linux backend was never compiled
+because only Windows ever compiled it.
+
+The lasting gain is coverage, not just colour: **the six `webview` test files run
+on Linux**, which Windows cannot do at all (there they take the host down), so
+`webview` now has the one platform where its tests are actually executed.
 
 **F0 is proven on Windows.** `examples/multiwindow` with
 `VAILS_MULTIWINDOW_PROBE=pings` brings up two windows, each showing its own label
@@ -127,19 +211,25 @@ code in this repo should read §2c before it is written.
 The repo's own rule (AGENTS.md §5) is that a line either names a proof or says it
 is unproven. The four things most likely to be over-read:
 
-- **B2+B3 (Dockerfile + CI): the CI has now been RUN once, and it is fixed but
-  still unproven.** The "never executed" claim was true until 2026-10-03, when it
-  was executed on GitHub and reported **"No jobs were run"** — one step had lost
-  its indentation, so the workflow was invalid YAML and GitHub had no jobs to
-  run. Fixed, and `buildplan/workflow_test.v` now guards it (the guard was
-  confirmed **red on the broken file and green on the fixed one**, which is the
-  only way to know a guard guards). The runner has still never reported a single
-  green job, so "CI is green" remains a claim nobody can make: the first real run
-  may well stop at the `json2` smoke step, which exists precisely to turn a
-  confusing failure into a named one.
-- **The Linux GUI proofs need a real session.** `menu.png` / `tray.png` /
-  `dialog.png` exist; the Linux `menu:clicked {id}` mapping does not, because Xvfb
-  has no window manager to deliver the click.
+- **B2+B3 (Dockerfile + CI): both jobs now build against a pinned V-from-source
+  compiler, which is as far as this file can claim without a green Windows run.**
+  The "never executed" claim was true until 2026-10-03. Since then the Linux
+  container job has **passed repeatedly**; the Windows job used to fail at the step
+  that checks whether the runner's own V can build this repository at all, because
+  it installed a *released* V and no release has `json2`. As of 2026-10-11 the
+  Windows job builds V from source at the same pinned commit the Dockerfile uses,
+  so that failure mode is gone by construction. **What is still unproven is the
+  run itself** — a red-to-green transition on a runner nobody has seen green is a
+  claim only the runner can settle, and this file will say which way it went when
+  it does. The accurate sentence today is: "both jobs compile against the same
+  pinned V, and the Linux half has been proven green on a clean runner many
+  times."
+- **The Linux GUI proofs need a real session, and three of the screenshots this
+  file used to cite have never existed.** `git log --all` returns **zero commits**
+  for `tests/e2e_windows/tray.png`, `tests/e2e_windows/menu.png` and
+  `tests/e2e_linux/dialog.png`, yet ADR-0017 and ADR-0027 both cited them as their
+  evidence — the errata on those ADRs record it. The Linux `menu:clicked {id}`
+  mapping does not, because Xvfb has no window manager to deliver the click.
 - **`post_to_main` is Windows-only.** On Linux it refuses by name; the
   `g_idle_add` trampoline is unwritten, and it is the first push onto the GTK
   main loop from a foreign thread in this repo's history.
@@ -166,14 +256,27 @@ is unproven. The four things most likely to be over-read:
   `Windows.winmd` or `UniversalApisContract.winmd`). Flipping that constant is
   the whole remaining work, and guessing a GUID instead would activate the wrong
   object.
-- **F0's second Windows window is written and type-checked, not observed.** The
-  COM apartment that unblocks it is in `webview_windows.c.v` and `v vet webview`
-  is green, but **this machine crashes its host on the `webview` test module** —
-  measured three times on 2026-09-30, with one test file at a time and with the
-  whole directory, and with no OOM in the Windows event log, so the cause is
-  still unknown. Until somebody runs `examples/multiwindow` and puts two windows
-  in a screenshot, "multi-window works" is a claim. Every other module's tests
-  pass: 15 of 16 modules green on 2026-09-30, and `webview` is the sixteenth.
+- **`drop`'s Linux half is compiled, not observed.** Written and compiled on
+  2026-10-10 in the pinned container; `doctor` reports `ok drop` and `7/9
+  backends native` on Linux, up from `5/9`. **A human drop has not happened and
+  it cannot be faked** — `GtkSelectionData` has no public constructor and V cannot
+  express `g_signal_emit_by_name`'s varargs to pass a struct, so there is no
+  `simulate_drop` and the six manual steps in `tests/e2e_linux/README.md` are the
+  remaining proof. The pure-V half is unchanged and still tested on both
+  platforms.
+- **F0's second Windows window is written and type-checked, not observed** — and
+  the *reason* it was not observed has changed shape, so read the next paragraph
+  before repeating it. Until 2026-10-05 this entry said the `webview` test module
+  crashes the Windows host (measured three times on 2026-09-30, one file at a time
+  and as a directory, no OOM in the event log). On 2026-10-05 all six `webview`
+  test files compiled **and ran**, twice, inside a full `v -cc gcc test .` at
+  45/45, on the same 0.5.2 master both measurements were taken against and with
+  no test edited to make them pass. **What changed is not known**, so treat this as
+  *currently green*, not *fixed* — it is recorded as history in the "Where we are"
+  table above, and F0's work since 2026-10-03 is the first thing to suspect if it
+  starts taking the host down again. The reason it is listed here anyway is the
+  part that did not change: nobody has run `examples/multiwindow` and put two
+  windows in a screenshot, so "multi-window works" is still a claim.
 
 ## Corrections worth remembering
 
@@ -210,7 +313,7 @@ Effort is in focused days and is an estimate, not a commitment.
 | 6 | B0 | **B2+B3** Dockerfile + matrix CI | 4 d | P2–P4, B4 | the repo has no CI; `v test .` is green on both platforms already | **done, unproven (ADR-0034)** — no runner or container here |
 | 7 | — | **U0/W0** `post_to_main` | 3 d | U4–U7, W1–W4 | three dependents; also the job half of ADR-0019 (its subscriber half shipped as ADR-0023) | **done on Windows (ADR-0019)** — `jobs.v` + a real E2E screenshot; Linux `g_idle_add` deferred |
 | 8 | — | **F0** multi-window | 6 d | **W**, `tray.set_menu`, U4's second window | highest-leverage single item; reopens an ADR-0020 decision | **done, PROVEN on Windows (ADR-0035, 2026-10-04)** — 21 routing tests + a real two-window run that found two shipped bugs (`webview_dispatch` success read as failure, then an access violation inside the DLL); Linux structurally done, unrun |
-| 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | planned |
+| 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | **done, and the gating question is answered** (ADR-0036, 2026-10-03) - `EnableWebDrop` is **not reachable**: the installed `webview` 0.12 header exposes no `ICoreWebView2Controller`, so the design went to `WM_DROPFILES` on the HWND instead. The observable proof is the outstanding half: nothing has seen a human drag a file |
 | 10 | U0 | **W1–W4** chrome + `window` service | 6 d | the tutorial's menu item, E6 | absorbs S1 wave-4 `window-state`/`positioner` | planned |
 | 11 | W, F0 | **U1–U4** updater core + service | 8 d | U5, P4 | the manifest-as-core half is pure V and no I/O | planned |
 | 12 | B1–B4 | **P0–P4** distribution | 8 d | release | the update-channel policy is decision-only and independent | planned |
@@ -276,10 +379,33 @@ item that would trigger it is recorded instead.
   with frontend grant + `frontend/` with ping demo); `doctor` checks
   `v --version`, toolchain, `vails.json`, `asset_root`; `build` sets
   `VMODULES` to the vails root (`VAILS_HOME` or walk-up).
-- [ ] **Phase 5 — Services** (S1 wave 1 + wave 2 shipped 2026-09-27,
-   ADR-0014/0015; full catalog below. Each next wave: `services/<name>.v`
-   seam + `_test.v` + capability + ADR line, one PR per service + manual
-   test):
+- [x] **Phase 5 — Services: the S1 catalog and its Linux backends are complete
+  as code.** Closed on 2026-10-10. Each wave shipped as
+  `services/<name>.v` + `_test.v` + a capability + an ADR line, and the four
+  S1 waves plus 5b are all checked below.
+
+  **What "complete as code" means here, and what it does not.** Every service in
+  the S1 catalog exists on both platforms or refuses by name on the one where it
+  cannot, the pure-V halves are unit-tested on both, and the Linux halves are
+  compiled in the pinned container. What is **not** claimed is runtime proof for
+  the paths that need a human — "What is claimed and what is proven" names each
+  one, and `tests/e2e_{windows,linux}/README.md` carries the procedures. The
+  outstanding halves were each measured rather than assumed, which is how
+  `opener.with` (a deliberate refusal on Linux, because the desktop decides) was
+  separated from a stub, and how `notification` (Windows-only by ADR-0039) was
+  separated from a gap.
+
+  **Two audit findings landed on the way, and they are why this line says "as
+  code":** `dialog_support()` reported the Linux `dialog` as a stub for two
+  releases after the backend landed, and `drop_linux.c.v` justified being empty
+  with a reason ("no Linux runner") that expired on 2026-10-05. Both were the same
+  failure — a reporting layer not swept when a capability landed — and both are now
+  closed with guards that assert the *content* of the status note.
+
+  **S2 and S3 below are Phase 5's catalog too and are NOT closed.**
+  `single-instance`, `autostart`, `global-shortcut`, `keychain`,
+  `screencapture` and `scoped fs` (S2) and the mobile service list (S3) are the
+  remaining work in this phase, and S2 starts before any of them.
   - [x] S1 core wave 1 (done, ADR-0014): `webview.Ctx` seam (V->JS
     `emit` + native parent handle, closing the Phase 2 event-delivery
     leftover, and wiring the T7 CSP onto the native path), the service
@@ -322,40 +448,54 @@ item that would trigger it is recorded instead.
       **verified and repaired** in the same wave: they had never compiled, and
       once compiling they had never worked — `menu.set_menu`, `tray.set_menu`,
       `window-state` and the GTK `dialog` are the next items.
-  - [ ] S1 core wave 4 (the rest of the S1 list): **`notification` is
-     done on Windows — ADR-0018 replaced ADR-0015's tray balloon with a real
-     WinRT toast** (`services/toast_shim.h`, the document built and tested in
-     pure V, the AppUserModelID from a new `vails.json`
-     `bundle.identifier`; compile- and link-verified, runtime proof pending
-     a machine with the WinRT runtime — see "Verification status" in ADR-0018
-     and `tests/e2e_windows/README.md`). **`menu.set_menu` shipped
-     2026-09-29 (ADR-0023)**: the window menu bar, as the *same* service as the
-     popup — same `MenuPopup` params, same id rules, same `menu:clicked` event,
-     so one frontend listener covers a right-click menu and a window bar. It
-     needed the window host seam to take a **second** hook on one window (tray's
-     `WM_APP+1`, the bar's `WM_COMMAND`), so a `HostHandler` now returns whether
-     it consumed the message and the two chain instead of sharing. GTK3 has no
-     `gtk_window_set_menubar` at all, so the Linux half packs a `GtkMenuBar`
-     into a vertical box that `run_linux` now always creates, reached through
-     the new `Ctx.toplevel` (the `GtkWindow`, not the GdkWindow `parent` is) —
-     which the GTK dialog needs too. Linux is E2E-proved (`menubar.png`: the bar
-     renders and a click reports the right id — provable *further* than the
-     popup, since a bar is a normal widget where a popup is override-redirect);
-     Windows compiles and links but is unproven at runtime. Still open:
-     `tray.set_menu` (the StatusNotifierItem's menu — on Linux that *is* the
-     click, since the tray host owns it, which also forces a ruling on
-     `WM_CONTEXTMENU`, already mapped to `tray:clicked {right}`) and the GTK
-     `dialog`. **`window-state` / `positioner` were handed to the window chrome track on
-     2026-09-29** (ADR-0021) rather than shipped as two small services: they
-     became the `window` service, which also carries frameless chrome and the
-     title-bar buttons, and they need the seam's subscriber list (ADR-0019)
-     anyway. Cf. `v3/pkg/services`.
-  - [ ] S2 system (after S1): `single-instance` → `autostart` →
+- [x] S1 core wave 4 (the rest of the S1 list) — **all code shipped**, and the
+  one behavioural fix that landed on the way records the rest:
+
+  **`notification` is done on Windows — ADR-0018 replaced ADR-0015's tray balloon
+  with a real WinRT toast** (`services/toast_shim.h`, the document built and
+  tested in pure V, the AppUserModelID from a new `vails.json`
+  `bundle.identifier`). **Runtime proof is impossible on this machine and the
+  reason is named, not hidden**: the Windows image has no WinRT class store at
+  all, so *no* class activates (ADR-0039 measures it, `doctor` says it by name,
+  and `tests/e2e_windows/README.md` carries the repair). The toast is
+  compile- and link-verified; a machine with WinRT observes it.
+
+  **`menu.set_menu` shipped 2026-09-29 (ADR-0023)**: the window menu bar, as the
+  *same* service as the popup — same `MenuPopup` params, same id rules, same
+  `menu:clicked` event, so one frontend listener covers a right-click menu and a
+  window bar. It needed the window host seam to take a **second** hook on one
+  window (tray's `WM_APP+1`, the bar's `WM_COMMAND`), so a `HostHandler` now
+  returns whether it consumed the message and the two chain instead of sharing.
+  GTK3 has no `gtk_window_set_menubar` at all, so the Linux half packs a
+  `GtkMenuBar` into a vertical box that `run_linux` now always creates, reached
+  through the new `Ctx.toplevel` — which the GTK dialog needs too. Linux is
+  E2E-proved (`menubar.png`); Windows compiles and links but is unproven at
+  runtime, for the same reason `drop` is.
+
+  **A swallowed failure was fixed on 2026-10-05**, on the same item:
+  `attach_bar_hook` caught the `webview.attach` error, `eprintln`'d it and
+  returned normally, so `set_menu` resolved `ok` on a window whose bar was
+  attached with nothing listening — while its own comment claimed the opposite.
+  It now propagates, the hook is installed **before** `SetMenu`, and a failure
+  destroys the `HMENU` it just built.
+
+  Still open, both by design rather than by omission: `tray.set_menu` is the
+  StatusNotifierItem's menu (ADR-0026, shipped 2026-09-29) — on Linux the tray
+  host owns the click and opens it, which forced the `WM_CONTEXTMENU` ruling
+  already mapped to `tray:clicked {right}` — and **`window-state` /
+  `positioner` were handed to the window chrome track on 2026-09-29**
+  (ADR-0021) rather than shipped as two small services: they became the
+  `window` service, which also carries frameless chrome and the title-bar
+  buttons, and they need the seam's subscriber list (ADR-0019) anyway.
+  Cf. `v3/pkg/services`.
+  - [ ] **S2 system (after S1 — the next wave in this phase):** `single-instance` → `autostart` →
     `global-shortcut` (risk: Wayland limits) → `keychain`
     (cf. `v3/internal/keychain`) → `store` (persisted KV — **moved to D1**,
-   see the native/data/Vinx track below) →
+    see the native/data/Vinx track below) →
     `screencapture` (per ADR-0009 B) → `scoped fs` (last, riskiest,
-    capability-locked).
+    capability-locked). *(The parent box is unchecked deliberately: S2 is Phase 5
+    work and S1 + 5b being closed does not close it. This is the wave that
+    starts, per the phase-discipline note in AGENTS.md §3.)*
   - [ ] S3 mobile (feeds M2): `haptics` (= `vibrate`), `biometric`,
     `geolocation`; `barcode-scanner` / `nfc` optional-late.
   - Out of scope (post-desktop, unchanged): `sidecar`
@@ -368,26 +508,60 @@ item that would trigger it is recorded instead.
      recorded honestly in that ADR — no second window, so the update UI is
      the app's own; and no way for a worker to reach the page, which is
      U0/ADR-0019.
-- [ ] **Phase 5b — remaining Linux service backends** (the toolchain is no
-  longer the blocker — ADR-0015 proved it works; what is left is the parts
-  that need a human or a desktop session):
+- [x] **Phase 5b — remaining Linux service backends**. Closed on 2026-10-10,
+  and closed by measurement rather than by belief: each of the three items this
+  section listed as outstanding was checked against the code rather than assumed.
+
   ~~`dialog`~~ **done 2026-09-29** (ADR-0027: `GtkFileChooserDialog` +
-  `gtk_dialog_run`; the response-id mapping is pure V and tested everywhere,
-  and the E2E proof answers a real `GtkMessageDialog` from a timer so it needs
-  no human — the "last S1 item waiting on a human" turned out not to be one).
-  Then `notification` (libnotify or GNotification; needs a D-Bus session to be
-  visible at all), then the `with` override for `opener` (a `.desktop` file
-  rather than an app name). `clipboard`, `opener`, `menu` and `tray` are
-  already done (waves 2 and 3), and `tray.set_menu` joined them 2026-09-29
-  (ADR-0026).
+  `gtk_dialog_run`; the response-id mapping is pure V and tested everywhere, and
+  the E2E proof answers a real `GtkMessageDialog` from a timer so it needs no
+  human — the "last S1 item waiting on a human" turned out not to be one).
+
+  **`notification` is closed as a decision, not as a gap.** This section listed
+  it as "libnotify or GNotification; needs a D-Bus session to be visible at all".
+  ADR-0039 then decided notification is a **Windows toast only** — the WinRT path
+  replaced the tray balloon, and `balloon` is the Win32 fallback for the machine
+  that cannot toast. So the item is not unfinished: it is a platform boundary,
+  and `doctor` reports `stub notification - no WinRT on this platform` by name
+  rather than "unsupported". ADR-0039 is the record of that ruling.
+
+  **`opener`'s `with` override is closed as a refusal, not a stub.** On Windows
+  it works and `doctor` says so; on Linux it returns an error naming the reason
+  ("the desktop decides which application opens a file — omit it"). A deliberate
+  refusal is a finished answer; a stub is not, and the distinction is what this
+  section was supposed to establish.
+
+  **And `drop` — the fourth Linux half, which this section never listed — was the
+  one that was actually still missing.** It was written and compiled on
+  2026-10-10; `vails doctor` on Linux goes from `5/9 backends native` to
+  `7/9`, and `drop` now carries its trade-off in the note the way Windows does.
+  See the `drop` line under "What is claimed and what is proven" and ADR-0036's
+  erratum for what is and is not proven about it.
+
   **The verification pass that was listed here first is done**
-  (2026-09-28): `examples/services` builds on Linux, `v test .` is 32/32 there,
+  (2026-09-28): `examples/services` builds on Linux, `v test .` is green there,
   and `menu.png` / `tray.png` carry the proofs. It turned out not to be a V
   problem at all — the full account, including the two GTK3 signals the file
   used that do not exist, is in `tests/e2e_linux/README.md`. What the pass
   could **not** prove is named there too: the Linux `menu:clicked {id}`
   mapping needs a real desktop session. Remaining checklist for a Linux
   desktop is below.
+  *(The count in this line used to say 32/32, which is what that day's suite
+  was. It is **45/45** on 2026-10-10, in a pinned container — the number is
+  left correct rather than historical because a stale count reads as a claim
+  about the present.)*
+  **The verification pass that was listed here first is done**
+  (2026-09-28): `examples/services` builds on Linux, `v test .` is green there,
+  and `menu.png` / `tray.png` carry the proofs. It turned out not to be a V
+  problem at all — the full account, including the two GTK3 signals the file
+  used that do not exist, is in `tests/e2e_linux/README.md`. What the pass
+  could **not** prove is named there too: the Linux `menu:clicked {id}`
+  mapping needs a real desktop session. Remaining checklist for a Linux
+  desktop is below.
+  *(The count in this line used to say 32/32, which is what that day's suite
+  was. It is **45/45** on 2026-10-10, in a pinned container — the number is
+  left correct rather than historical because a stale count reads as a claim
+  about the present.)*
 - [ ] **Phase 6 — Cross-platform**: Windows first (WebView2/COM behind
   a C wrapper — V has no COM projection; highest risk), then macOS
   (WKWebView/ObjC). Freeze `application/` + `bridge/` API before starting.
@@ -725,10 +899,10 @@ of two (`tray`, `window`, `updater`), which is what made it worth doing first.
 what remains here is W0b (the `chrome` config plumbing) and then W1. Note that
 ADR-0019's Linux half is still unwritten, so W4's debounced `window-state` is
 Windows-provable now and not yet Linux-provable. Linux is otherwise no longer
-blocked: `v test .` is green there (32/32) and `examples/services` builds, so
-W2 is a matter of adding evidence. What stays unprovable in a container is
-unchanged and belongs to the manual checklist (the `menu:clicked {id}` mapping
-needs a desktop session). ~6 focused days.
+blocked: `v test .` is green there (45/45 in the pinned container) and
+`examples/services` builds, so W2 is a matter of adding evidence. What stays
+unprovable in a container is unchanged and belongs to the manual checklist (the
+`menu:clicked {id}` mapping needs a desktop session). ~6 focused days.
 Per AGENTS.md §3, no W-item starts while Phase 5 is the current phase. Each
 item: code + tests on both OSes + short ADR update + checkbox.
 
@@ -979,10 +1153,11 @@ away — and until that milestone lands, the honest answer stays
 
 Order: U0 → U1 → U2 → U3 → U4 → U5 → U6 → U7, after Phase 5b, before Phase 7.
 Nothing here is a macOS commitment; Phase 6 first. Linux is not blocked —
-`v test .` is 32/32 there and the app builds, so U7's Linux entries are added
-evidence rather than an unblocking. ~14 focused days, which does **not** fit
-the "~2 focused weeks" currently claimed for S1 wave 4 + Phase 5b —
-re-baselining the roadmap against that is an open decision in ADR-0020, not
+`v test .` is 45/45 in the pinned container there and the app builds, so U7's
+Linux entries are added evidence rather than an unblocking. ~14 focused days,
+which does **not** fit the "~2 focused weeks" currently claimed for S1 wave 4 +
+Phase 5b — re-baselining the roadmap against that is an open decision in
+ADR-0020, not
 something this track decides. Note also that W0 and U0 are the same work
 (ADR-0019), and B0 gates U6. Per
 AGENTS.md §3: no U-item starts while Phase 5 is the current phase. Each item:
@@ -1128,8 +1303,10 @@ a small platform nicety, or a non-goal with a reason attached.
   - **`buildplan/dispatch_test.v` guards both bugs**, textually, because no unit
     test can reach C: no `webview_dispatch` call anywhere in `webview/`, and no
     `if (!C.webview…)` negation of a zero-is-success error code. It lives in
-    `buildplan` rather than `webview` because `v test webview` takes this host
-    down, and a guard nobody can run is the "passes because its subject is
+    `buildplan` rather than `webview` because it was written when
+    `v test webview` took this host down (see "Where we are" — that is **no
+    longer true as of 2026-10-05**, and moving it is now allowed but not
+    required), and a guard nobody can run is the "passes because its subject is
     missing" failure `buildplan/workflow_test.v` already refuses. Verified the
     only way a guard can be trusted: **red** on a reintroduced call, naming the
     file and line, then green.
@@ -1184,11 +1361,17 @@ a small platform nicety, or a non-goal with a reason attached.
   - **Paths, never contents.** A page that wants a file's bytes has to be given
     a way to ask; that capability should be granted on its own rather than
     inherited by every window that can receive a drop.
-  - **Linux is unwritten on purpose** (AGENTS.md §3.4, ADR-0015's lesson: no
-    native code that has never been compiled, and there is no Linux runner
-    here). Everything that is not native is done and tested; the gap is a
-    `GtkDropTarget` and one function. `doctor` says "unwritten", not
-    "unsupported", because only one of those is true.
+  - **Linux is compiled, not proven.** The backend landed on 2026-10-10:
+    `gtk_drag_dest_set` plus URI target entries on the toplevel, reading
+    `text/uri-list` through `g_filename_from_uri`, and `vails doctor` reports
+    `7/9 backends native` with `ok drop`. It compiles and links in the pinned
+    container and the services suite is green there. **A human drop has not
+    happened**, and it cannot be faked: `GtkSelectionData` has no public
+    constructor and V cannot express `g_signal_emit_by_name`'s varargs to pass a
+    struct, which is measured rather than assumed. So there is no
+    `simulate_drop`, and `tests/e2e_linux/README.md` carries six written-out
+    manual steps instead — the same refusal-by-name `tray.simulate_click` makes
+    on Linux, for the same reason.
   - **Still unchecked, and for the same reason as F0**: nothing has seen a human
     drag a file, because the Windows GUI proofs go through the `webview` module
     that crashes this host. The outstanding run is the six-step procedure in

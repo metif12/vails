@@ -57,10 +57,7 @@ fn set_tray_native(mut st &TrayState, opts TrayOptions) ! {
 	// The seam is installed here, not by webview.run: an app that never shows a
 	// tray icon gets no subclass on its window at all (ADR-0017).
 	if st.hook == unsafe { nil } {
-		// `owner` rather than `st` in the capture: V 0.5.2 types a closure
-		// capture of a `mut` pointer *parameter* as a pointer to the pointer, and
-		// the generated C assignment is rejected by gcc. A plain local captures
-		// correctly. Same workaround as tray_backend, same reason.
+		// `owner`, not `st`: see webview.attach's "One caller-side rule".
 		owner := st
 		hook := webview.attach(st.ctx, fn [owner] (e webview.HostEvent) !bool {
 			return on_host_message(owner, e)!
