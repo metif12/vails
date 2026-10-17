@@ -1107,6 +1107,44 @@ both halves of that so the next person does not have to guess which is which.
   worse than no service.
 
 ### Fixed
+- **The Linux CI job was green without ever building V, and then failed on a
+  Dockerfile that had not changed by one byte.** `vlang/v` does not ship its own
+  bootstrap compiler: `GNUmakefile` sets `VCREPO ?= https://github.com/vlang/vc`
+  and `make` clones **that separate repository** and pulls its HEAD before
+  compiling `vc/v.c`. So the `V_SHA` pin pinned the V *tree* and left the
+  compiler that decides whether the build happens at all unpinned.
+
+  vc HEAD `d4045d7f` (2026-10-16) publishes a `v.c` whose Windows-only
+  declarations sit outside their `_WIN32` guard, so every Linux build from
+  vlang/v master dies on `./vc/v.c:15660: unknown type name 'DWORD'`.
+  Reproduced outside CI in WSL with a plain `make`: same error, gcc 15.2.0.
+
+  **Why the job had been passing.** The `latest_vc` pull runs inside the
+  V-build layer. While the apt layer was a cache hit, that layer was reused
+  wholesale and the pull never executed — those runs proved a cached layer
+  existed, not that V builds. When apt produced new package versions the layer
+  invalidated, the pull really ran, and the build broke. A green run that never
+  ran the command is not evidence, which is the Dockerfile header's third point
+  arriving a week late.
+
+  The Dockerfile now pins `VC_SHA=bcfdc7f33e7b7908ee40f76d059c0e2894fb4a3b` and
+  passes `make GIT_ARGV_RUNNER=false` so `latest_vc` takes its own documented
+  else-branch — "git not found; using existing `vc/v.c`" — instead of pulling.
+
+  **The snapshot must not be newer than `V_SHA`, and that half is not
+  obvious.** Snapshot `20e483a3` builds the C fine and then fails with
+  `cmd/v/v3_fallback_diagnostics.v:4:1: builder error: cannot import module
+  "v.ansi" (not found)`: a newer v1 compiling an older V tree asks for modules
+  that tree does not have, and it reads as a missing module rather than as
+  version skew. `bcfdc7f3` was generated from master `a60fb589` on 2026-10-10,
+  the same day as `V_SHA`.
+
+  Verified by building the image locally and running the job's own three steps:
+  `v test .` is **46/46** with no `collect2` / `undefined reference` in the log,
+  the CLI and `examples/services` build, and `vails doctor` reports
+  `vails.json : ok (1 window(s), 3 capabilit(ies))` — the `json2` defect check,
+  which is the reason this repository is built from source at all.
+
 - **The deployed documentation site was missing its stylesheet, and the export
   never copied static assets at all.** `vails doctor`, the local export and the
   `docs.yml` export step all reported success while the published site at

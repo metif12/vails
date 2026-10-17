@@ -140,13 +140,71 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #      regression) — grep for it; the summary line will not tell you
 #   3. 45/45, obviously
 # The first two are the failure modes that stayed green while being broken.
+# The first three checks are V's. The fourth is the one that was missed.
+#
+# **`vc/` is a SEPARATE repository and `make` pulls it by default.** `vlang/v`
+# does not contain its own bootstrap compiler: `GNUmakefile` defines
+# `VCREPO ?= https://github.com/vlang/vc`, and `all: latest_vc latest_tcc
+# latest_legacy` clones that repo and pulls its HEAD before compiling
+# `$(VC)/v.c`. So pinning `V_SHA` pins the V *tree* and leaves the bootstrap
+# compiler floating - the same unpinned-ref hole this file argues against for
+# the base image, one level down, and in the component that decides whether the
+# build happens at all.
+#
+# That hole is not hypothetical. vc HEAD `d4045d7f` (2026-10-16) ships a `v.c`
+# whose Windows-only declarations sit outside their `_WIN32` guard:
+#
+#     ./vc/v.c:15660:28: error: unknown type name 'DWORD'
+#     15660 | bool GetConsoleMode(void*, DWORD*);
+#
+# `DWORD` *is* typedef'd, at v.c:1010 - inside the guard. Every Linux build from
+# vlang/v master dies on that line. Reproduced outside CI, in WSL, with plain
+# `make`: same error, gcc 15.2.0.
+#
+# **Why the Linux job was green until 2026-10-17 anyway.** The `latest_vc` pull
+# happens inside the V-build layer. While the apt layer was a cache hit, that
+# layer was reused wholesale and the pull never executed - so those runs proved
+# "the image builds" only in the sense that a cached layer still existed. When
+# apt produced new package versions, the layer invalidated, the pull really ran,
+# and the build broke on a commit whose Dockerfile had not changed by one byte.
+# A green run that never ran the command is not evidence, which is the third
+# point of this file's own header arriving late.
+#
+# **The snapshot must not be NEWER than `V_SHA`.** A newer v1 compiles an older
+# V tree badly: snapshot `20e483a3` (from master `9e0c3e77`, 2026-10-14) builds
+# the C fine and then fails with
+# `cmd/v/v3_fallback_diagnostics.v:4:1: builder error: cannot import module
+# "v.ansi" (not found)` - `v.ansi` does not exist in the 2026-10-10 tree. The
+# snapshot has to be contemporary with the pin or older.
+#
+# **`VC_SHA=bcfdc7f3` is the newest snapshot that satisfies both halves**:
+# generated from master `a60fb589` on 2026-10-10, the same day as `V_SHA`, and it
+# compiles on Linux. Verified end-to-end in WSL: `make` succeeds, `./v version`
+# reports `V 0.5.2 60542b9`, `vlib/json2` is present, and a `json2.encode` probe
+# prints `{"a":1}`.
+#
+# **`GIT_ARGV_RUNNER=false` is what keeps the pin.** It overrides V's own hook
+# (`cmd/tools/git_argv.sh`) with a command that does not exist, so the
+# `latest_vc` recipe takes its documented else-branch - "git not found; using
+# existing `vc/v.c`" - instead of `git pull`. Without it the clone below is
+# undone a second later and the pin buys nothing.
+#
+# **Bump `VC_SHA` deliberately, and check both halves**, not just that it builds:
+#   1. the snapshot's `v.c` compiles on Linux (`cc -std=c99 -w -o /dev/null v.c`)
+#   2. the V master sha in its commit message is an ANCESTOR of `V_SHA`
+# A snapshot can satisfy 1 and fail 2, and the failure then looks like a missing
+# V module rather than a version skew.
 ARG V_SHA=60542b9904a3a0102575ec1104e548996f650a83
+ARG VC_SHA=bcfdc7f33e7b7908ee40f76d059c0e2894fb4a3b
 WORKDIR /opt/vlang
 RUN git init -q . \
     && git remote add origin https://github.com/vlang/v.git \
     && git fetch --depth 1 origin $V_SHA \
     && git checkout -q FETCH_HEAD \
-    && make \
+    && git clone -q --filter=blob:none https://github.com/vlang/vc vc \
+    && git -C vc fetch --depth 1 origin $VC_SHA \
+    && git -C vc checkout -q FETCH_HEAD \
+    && make GIT_ARGV_RUNNER=false \
     && ./v version
 
 # The checkout under test. Copied rather than mounted so a `docker run`

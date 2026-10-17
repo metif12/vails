@@ -134,6 +134,19 @@ installed *before* V (V's own Windows build needs a C compiler).
    thing `vlang/v`'s `windows_ci_gcc.yml` runs after checkout, so it is the
    recipe V validates on a runner rather than one invented here.
 
+**The Linux job needed a second pin, and finding out why is the point.** `vlang/v`
+does not contain its bootstrap compiler: `make` clones `vlang/vc` and pulls its
+HEAD, so `V_SHA` alone never pinned the compiler that decides whether the build
+happens at all. vc HEAD `d4045d7f` (2026-10-16) ships a `v.c` that does not
+compile on Linux (`unknown type name 'DWORD'`, Windows declarations outside their
+guard), and the job stayed green until 2026-10-17 for one reason only: the pull
+lives inside the V-build layer, so a cached apt layer meant the pull never ran.
+The Dockerfile now pins `VC_SHA` to the newest snapshot that both compiles and
+predates `V_SHA`, and passes `GIT_ARGV_RUNNER=false` so `latest_vc` keeps it.
+Verified locally: image builds, `v test .` is 46/46 with no `collect2` /
+`undefined reference`, CLI and app build, and `vails doctor` reports
+`vails.json : ok`. See the `Fixed` entry in `CHANGELOG.md`.
+
 The `-ldflags` and `-cflags` stay in the job, and they stay for a reason that
 survived the restructure: they are **version-scoped**, needed on 0.5.2 and
 unnecessary on the master now pinned, and a command that works on both compilers
