@@ -1106,6 +1106,42 @@ both halves of that so the next person does not have to guess which is which.
   — a manifest promising a service with no reachable native implementation is
   worse than no service.
 
+### Fixed
+- **The deployed documentation site was missing its stylesheet, and the export
+  never copied static assets at all.** `vails doctor`, the local export and the
+  `docs.yml` export step all reported success while the published site at
+  <https://metif12.github.io/vails/> served `/static/css/site.css` as a
+  **404** — live, readable, unstyled. The exporter walked its route list and
+  wrote each route, and static files are not routes: nothing renders them, veb
+  serves them from `static/` through its own handler. `export()` now mirrors
+  `static/` into the output with `os.cp_all`, so the bytes on Pages are the
+  bytes in the repository and a second asset needs no code change.
+
+  **Two guards were added, because the first one could not have caught this.**
+  The export check asserted that two HTML files existed; neither was the thing
+  the page actually loads. It now also asserts that `index.html` *references* the
+  stylesheet and that the referenced file is in the export — so the check reads
+  the page's own link rather than trusting the exporter's report.
+
+- **`vails dts` / the docs site could not export at all on a Boehm-GC build,
+  and the site crashed at startup on V master.** Both are one-line causes with
+  one-line fixes, found by running the exporter rather than by reading it:
+
+  - `-gc none` on the site build, per ADR-0005's rule. veb handles every
+    connection on its own thread, and Boehm aborts when the collection is
+    triggered off the main thread. Measured on Windows: the exporter's own
+    server answered `/` (831 bytes) and was gone by the next request, dying with
+    `internal_gc_abort_to_stderr`; the parent then waited on a port nobody was
+    listening on until the step timed out. The symptom reads as "the server is
+    slow to start", which is why it survived as long as it did.
+  - The route method declares `mut ctx Context`. veb builds its route table with
+    `for param in method.args[1..]`, so a route method without a context
+    parameter panics inside `veb.run` with
+    `array.slice: invalid slice index (start>end):1, 0` before serving anything.
+
+  Both are the shape of failure this repository keeps meeting: a check that
+  passes while the thing is broken, because it measured the wrong property.
+
 ## [0.4.0] - 2026-09-28
 
 Phase 5 S1 wave 3: the window host seam, and the two services that are driven

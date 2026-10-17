@@ -119,8 +119,19 @@ jobs:
         # - measured on the run that produced this comment. The static folder and
         # the export output are resolved from `@FILE` in `buildplan.site_paths`,
         # so they are unaffected; only the template lookup is CWD-relative.
+        #
+        # `-gc none` is not optional, and the reason is ADR-0005's reason rather
+        # than a new one: Boehm GC aborts when it is triggered off the main
+        # thread, and veb handles every connection on its own thread. Measured on
+        # Windows with V master: the exporter's own server answered `/` (831
+        # bytes) and was then gone by the next request, dying with
+        # `internal_gc_abort_to_stderr` / `Collecting from unknown thread` and
+        # nothing on stdout. The parent then sat in `wait_for_listener`'s successor
+        # until the step timed out - which is why a site that has a working preview
+        # mode can still fail to export. ADR-0005 wrote this rule down for GUI apps
+        # and WebKit; the same GC, the same abort, one layer down.
         working-directory: docs/site
-        run: v -prod -o site.exe veb_site.v
+        run: v -prod -gc none -o site.exe veb_site.v
       - name: Export the site
         # A separate step from the build, for two reasons that a combined
         # `v -prod run` costs you: the build cannot fail the run's failure, and
@@ -140,11 +151,24 @@ jobs:
         # repository has already had twice - once a 404 body as the home page,
         # once a dist/ written beside the Dockerfile. buildplan already asserts
         # the path mapping; this asserts the artifact is actually there.
+        #
+        # The CSS check is not decoration and it is the newest line here. The
+        # exporter originally wrote only the HTML, and the omission was invisible
+        # everywhere except the deployed site: local export, doctor and this step
+        # all passed while `/static/css/site.css` returned 404 on Pages. So this
+        # asserts something the page actually loads, not merely something the
+        # export claims to have made.
         run: |
           set -eu
           test -f docs/site/dist/index.html || { echo "::error::no index.html in the export"; exit 1; }
           test -f docs/site/dist/404.html || { echo "::error::no 404.html in the export"; exit 1; }
-          echo "exported $(find docs/site/dist -name '*.html' | wc -l) HTML file(s)"
+          # The stylesheet index.html links to. If this is absent the site is
+          # live and unstyled, which no check above would have caught.
+          grep -q '/static/css/site.css' docs/site/dist/index.html \
+            || { echo "::error::index.html does not reference the stylesheet"; exit 1; }
+          test -f docs/site/dist/static/css/site.css \
+            || { echo "::error::the stylesheet the page links to was not exported"; exit 1; }
+          echo "exported $(find docs/site/dist -name '*.html' | wc -l) HTML file(s) and $(find docs/site/dist -type f ! -name '*.html' | wc -l) asset(s)"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

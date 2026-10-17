@@ -157,8 +157,15 @@ fn mount(mut app &App) {
 //
 // `$tmpl` looks up `templates/index.html`, and with `-prod` that file is compiled
 // in, so a missing template is a compile error.
+//
+// The `mut ctx Context` parameter looks like boilerplate and is load-bearing. veb
+// builds its route table with `for param in method.args[1..]`, so a route method
+// that declares no context panics inside `veb.run` with
+// `array.slice: invalid slice index (start>end):1, 0` — measured on V master
+// `dcac508`, and it kills the process before the first request. Removing the
+// parameter to "tidy" the signature reintroduces a startup crash.
 @['/']
-fn (app &App) index() veb.Result {
+fn (app &App) index(mut ctx Context) veb.Result {
 	return $veb.html()
 }
 
@@ -216,7 +223,45 @@ fn export() {
 	if written != routes.len {
 		panic('site: expected ' + routes.len.str() + ' route(s), wrote ' + written.str())
 	}
-	println('exported ' + written.str() + ' route(s) to ' + out_dir)
+
+	// Static assets are NOT reached by the export loop, because they are not
+	// routes: nothing renders them, they are served by veb's StaticHandler from
+	// `static/`. So they have to be copied explicitly, and the first version of
+	// this exporter did not do it.
+	//
+	// The consequence was invisible until the site was deployed: `vails doctor`
+	// and the local export both looked right, the page rendered its markup, and
+	// the live site at https://metif12.github.io/vails/ served
+	// `/static/css/site.css` as a **404** — an unstyled page whose export had
+	// reported success. The lesson is the one this file's own header gives about
+	// not trusting a green line: the export check verified two files existed, and
+	// neither was the thing the page actually loads.
+	//
+	// Copied rather than rendered, so the bytes on Pages are the bytes in the
+	// repository — no second template path for assets to drift from.
+	copy_static()
+
+	println('exported ' + written.str() + ' route(s) + static/ to ' + out_dir)
+}
+
+// copy_static mirrors `static/` into `dist/static/`.
+//
+// A recursive walk rather than a fixed file list, because a stylesheet is not the
+// only thing a site has: one JS file or one image should not need a code change.
+// A missing `static/` is not an error — the site is valid without assets — but
+// an existing one that fails to copy is, because the page would reference files
+// that are not there.
+fn copy_static() {
+	src := os.join_path(site_root, 'static')
+	if !os.is_dir(src) {
+		return
+	}
+	dst := os.join_path(out_dir, 'static')
+	os.mkdir_all(dst) or { panic('site: cannot make ' + dst) }
+	os.cp_all(src, dst, true) or {
+		panic('site: copying static/ failed: ' + err.msg())
+	}
+	println('  wrote ' + dst + ' (from ' + src + ')')
 }
 
 // wait_for_listener blocks until the port answers **200**, or gives up with the
