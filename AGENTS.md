@@ -270,6 +270,100 @@ https://github.com/vlang/v`, then copy `vlib/v/skills/<name>/` to
 `~/.agents/skills/<name>/`, which is exactly what `v skills add <name> --global`
 does. `v mcp serve` needs the built compiler, so it is not available here yet.
 
+### 1c. The suite needs two flags on THIS machine, and one of them hides 13 test files
+
+`v test .` as written in §1 **does not run cleanly** with the local compiler
+(`V 0.5.2 dcac508`, a master build). The command that works:
+
+```powershell
+$env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
+$env:VJOBS = '1'
+v -cc gcc -nocache test .
+$env:VJOBS = $null
+```
+
+Both flags were measured one at a time, and neither failure names its cause.
+
+- **`VJOBS=1`, because the parallel test runner aborts.** `v -cc gcc test
+  ./buildplan` prints `---- Testing...`, then `Collecting from unknown thread`,
+  then exits 1 with zero test output. That message is libgc's, and vlib ships its
+  own regression test for it: `vlib/v/tests/shared_library_boehm_register_threads_test.v`,
+  filed as vlang/v#27178 — a collection triggered off the main thread on a
+  thread libgc does not know about. veb and the test runner both hand work to
+  their own threads, so the same Boehm that §2c warns about elsewhere shows up
+  here as a runner that dies before printing a single result. Serial, it is
+  green (7/7 in `buildplan`). Not a Vails defect, and not the parallel *tests*
+  — the abort happens before any of them run.
+
+- **`-nocache`, because the module cache emits invalid C for `vlib/builtin`.**
+  With the cache on, 26 of 33 test files fail to build with
+
+  ```
+  failed to build cached module object ...\builtin_c1c7bacd64fe108a_<hash>.o
+  builtin_...c:6377:1: error: expected identifier or '(' before string constant
+  6377 | "62090000630900008109000081090000bc090000..."
+  ```
+
+  A bare string literal where a declaration belongs, thousands of times, in
+  generated C. `-nocache` builds the same files, exit 0. `v clear -module-cache`
+  does **not** exist in this compiler (`unknown option`), and deleting
+  `%LOCALAPPDATA%\Temp\v_0` by hand does not help — the next run regenerates the
+  same broken C, so this is a codegen defect in the cached path, not a poisoned
+  cache.
+
+**Why this section exists rather than a line in §1.** The `-nocache` run reports
+**46 passed, 46 total** and the cached run reports **33 passed, 33 total**, both
+green-looking, and the difference is 13 files: every `services/*_test.v`. A
+shorter suite is not a failing suite, so nothing in the output says anything is
+missing — the count is the only evidence, and nothing in the output says which
+files. Those 13 tests cover the entire service catalog.
+
+**Two more facts about the numbers, so they are not mistaken for drift:**
+
+- The suite is **46 test files / 289 `test_` functions**. A run prints one `OK`
+  line per file, but the 46th (`application_test.v`) reports through a different
+  line, so "45 OK lines" is not "45 of 46".
+- A serial `-nocache` run takes **~11 minutes** and can fail 2 files with
+  `failed to create C build directory ...\Temp\v_0\tsession_<id>\18_0\.` — not
+  disk space (C: had 34.8 GB free), and both files passed when re-run
+  individually, exit 0. Treat that message as a local flake, and re-run the file
+  before believing it.
+
+**CI is the authority on this repository's tests, and it is green.** Both jobs
+build their own V — Linux from `Dockerfile`, Windows from source at the same pin —
+and both run the suite. That is what caught the `vlang/vc` pin (§ the Dockerfile
+header), which no local run would have found.
+
+### 1d. `Remove-Item` on a build output directory: `services/` is a module, not an artifact
+
+Written because I deleted 45 tracked files this way and only noticed an hour
+later, and the failure mode is quiet enough to be worth naming.
+
+`vails build` for `examples/services` writes into **`services/out/`** — inside
+the repository's `services/` module. The module then contains source, 13 test
+files, and generated output in one directory, and `git status` shows only the
+`out/` entry as untracked.
+
+```powershell
+# WRONG - deletes the module: 45 tracked files, including 13 _test.v
+Remove-Item 'services' -Recurse -Force
+
+# RIGHT - the artifact only
+Remove-Item 'services/out' -Recurse -Force
+```
+
+**How it stayed hidden for an hour.** The suite that followed reported **33
+passed, 33 total** — green, exit 0. Only comparing it against the container's
+46 exposed the loss, and only because 33 files matched the count of `_test.v`
+files that existed *on disk*, which is exactly what a deleted test file looks
+like.
+
+**The rule that would have caught it:** never `Remove-Item -Recurse` on a path
+whose name is also a tracked directory, and after any build clean-up run
+`git status --porcelain | Select-String '^ ?D'`. If that prints anything, stop
+and `git checkout -- <path>` before running any test — a suite that ran over a
+damaged tree proves nothing about the tree.
+
 
 ## 2. V style rules
 

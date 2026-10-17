@@ -1145,6 +1145,25 @@ both halves of that so the next person does not have to guess which is which.
   `vails.json : ok (1 window(s), 3 capabilit(ies))` — the `json2` defect check,
   which is the reason this repository is built from source at all.
 
+  Reported upstream as [vlang/v#30774](https://github.com/vlang/v/issues/30774),
+  with the guard structure located rather than guessed: there is no `#if` between
+  lines 15600-15680, and the `#ifdef _WIN32` that typedefs `DWORD` at line 1010
+  closes at line 3748 — so the two declarations using the type are ~11800 lines
+  outside the block that defines it.
+
+- **`v test .` could not run on a developer machine, and the way it failed made
+  the suite look smaller rather than broken.** On the local V master build this
+  repository needs two flags — `VJOBS=1` and `-nocache` — and without them the
+  results are two different green numbers that mean different things, which is
+  worse than a failure. `AGENTS.md` §1c now carries the measurements: the
+  parallel runner aborts with libgc's `Collecting from unknown thread` (the
+  condition in vlang/v#27178, which vlib already ships a regression test for),
+  and the module cache emits invalid C for `vlib/builtin` — bare string literals
+  where declarations belong, thousands of times. Without `-nocache` the suite
+  reports **33 passed** instead of **46**, and the 13 missing files are every
+  `services/*_test.v`: the entire service catalog. A shorter suite is not a
+  failing suite, so nothing in the output says anything is missing.
+
 - **The deployed documentation site was missing its stylesheet, and the export
   never copied static assets at all.** `vails doctor`, the local export and the
   `docs.yml` export step all reported success while the published site at
