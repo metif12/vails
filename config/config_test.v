@@ -58,6 +58,8 @@ fn test_validate_rejects() {
 	check_invalid('{"name":"demo","windows":[{"label":"","title":"T","width":800,"height":600}]}')
 	check_invalid('{"name":"demo","windows":[{"label":"main","title":"","width":800,"height":600}]}')
 	check_invalid('{"name":"demo","windows":[{"label":"main","title":"T","width":0,"height":600}]}')
+	check_invalid('{"name":"demo","windows":[{"label":"main","title":"T","width":800,"height":600,"chrome":"bogus"}]}')
+	check_invalid('{"name":"demo","windows":[{"label":"main","title":"T","width":800,"height":600,"backend":"bogus"}]}')
 	check_invalid('{"name":"demo","asset_root":"","windows":[{"label":"main","title":"T","width":800,"height":600}]}')
 	check_invalid('{"name":"demo","windows":[{"label":"main","title":"T","width":800,"height":600},{"label":"main","title":"U","width":800,"height":600}]}')
 	check_invalid('{"name":"demo","windows":[{"label":"main","title":"T","width":800,"height":600}],"capabilities":[{"id":"","commands":["ping"]}]}')
