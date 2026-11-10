@@ -810,7 +810,7 @@ do not.
   `ping→pong` through the unchanged `bridge.Router` seam; record the
   binary-size delta and `-gc none` behaviour. Park or delete spike code;
   no schema changes yet.
-- [ ] **V1 — Pure-V seam (reuse C1)**: `webview.Config.backend` gains a
+- [x] **V1 — Pure-V seam (reuse C1)**: `webview.Config.backend` gains a
   `'vox'` value alongside `'os'`/`'chromium'` (the latter now deprecated and
   never shipped); `WindowConfig.backend` string keeps `'os'` as default;
   `validate()` rejects `'chromium'`; tests pure-V, green on Windows;
@@ -872,7 +872,8 @@ this repo proves in.
   needed** — ADR-0023's `!bool` chaining already let two handlers share one
   window, so `tray` keeps its own `HostCtx` and coexists with the job wakeup
   rather than migrating. See track U's U0 for the details and the E2E proof.
-- [ ] **W0b — the config plumbing**: `webview.Config.chrome` +
+- [x] **W0b — the config plumbing**: `webview.Config.chrome` + (plumbed through
+  config.WindowConfig.chrome and webview.Config.chrome, validated both sides)
   `WindowConfig.chrome` + `config` validation, plumbed to **all five**
   `WindowConfig` → `webview.Config` sites (`cli/vails.v:141` and `:490`,
   `examples/{hello,dialog,services}/main.v`), **one of which is inside a
@@ -1591,7 +1592,7 @@ priority table above.
   No `sql` service manifest ships with it, on purpose: a manifest would make
   `vails dts` promise `sql.exec` before there is a database behind it, which
   ADR-0025 calls worse than no service. D3 adds `vsql` against this seam.
-- [ ] **D1 — `store`**, promoted out of S2: one durable key-value surface with
+- [x] **D1 — `store`**, promoted out of S2: one durable key-value surface with
   a **swappable engine behind a seam**, default a **JSON file** (the data is
   config-shaped, a few KB, no dependency, gcc-free, and the file stays
   inspectable — a real property, not a nicety). A KV store is a few hundred
