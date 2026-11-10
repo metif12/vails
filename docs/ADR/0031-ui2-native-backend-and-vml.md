@@ -10,8 +10,10 @@ is optional — the app must work without it.
 
 Both halves already exist upstream, and the shape of them decides this ADR:
 
-- **`vlang/ui2`** is real and active — MIT, 62 stars, last pushed 2026-09-26 —
-  and **created 2026-09-05**. It is roughly three weeks old. It is **not** in
+- **`vlang/ui2`** is real and active — MIT, 75 stars, last pushed 2026-11-09 —
+  and **created 2026-09-05**. It is roughly two months old and still moving
+  fast (stylesheet engine, animations, VML, component styling landed since).
+  It is **not** in
   this machine's `vlib`, so it arrives through VPM, which means Vails needs a
   dependency story it does not have (ADR-0032, item B5).
 - **VML is a compile-time construct, not a runtime parser.** `$vml('views/x.vml')`
@@ -115,7 +117,8 @@ builds, and N4 not before N3 has a file format people can read.
   compile-time design is what makes this unnecessary.
 - **Ship the editor first.** It would have to invent a format, and any format
   it invents that the compiler does not then accept is throwaway work.
-- **Adopt `ui2` without a spike.** It is three weeks old; the cost of finding
+- **Adopt `ui2` without a spike.** It is roughly two months old and moving
+  fast; the cost of finding
   out it does not build on one of the two platforms should be one afternoon,
   not a wave.
 
@@ -131,7 +134,7 @@ builds, and N4 not before N3 has a file format people can read.
   still a single file with side-by-side DLLs or a system GTK. Which is worth
   noting, because it means the packaging work is not contingent on this track.
 - `ui2`'s maturity is the track's biggest risk and is a fact, not a concern:
-  three weeks old, 62 stars, not in `vlib`. That is why `native` is opt-in and
+  roughly two months old, 75 stars, not in `vlib`. That is why `native` is opt-in and
   why N0 is a spike rather than an integration.
 
 ## Open decisions (not taken here)
@@ -158,8 +161,8 @@ builds, and N4 not before N3 has a file format people can read.
   ships in V 0.5.2 even though the runtime module does not. Worth knowing
   before assuming the feature is imaginary: the split is real and it is the
   reason the spike starts by *installing* rather than by writing.
-- **`vlang/ui2`: MIT, 62 stars, 7 forks, 5 open issues, created 2026-09-05,
-  last pushed 2026-09-26.** Recorded because a roadmap line that says "V's own
+- **`vlang/ui2`: MIT, 75 stars, 11 forks, created 2026-09-05, last pushed
+  2026-11-09.** Recorded because a roadmap line that says "V's own
   UI toolkit" and one that says "a three-week-old MIT module with 62 stars"
   lead to different decisions.
 - **`$vml` resolves relative paths** in a defined order — the V source file,

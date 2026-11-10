@@ -22,7 +22,8 @@
 Before the build starts (see `ROADMAP.md`):
 
 - Phase 3 (assets/dev) through Phase 7 (hardening), plus tracks T3/T4/T5,
-  M0–M4, C0–C4.
+  M0–M4, V0–V5 (the vox browser track; the old C0–C4 Chromium/CEF track
+  was removed when `vlang/vox2` shipped).
 - The service catalogue (S1/S2/S3) is final, because every service needs a docs
   page.
 - `generator` and `vails.json` have settled, so the CLI/API reference is

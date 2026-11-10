@@ -784,57 +784,64 @@ Gradle scaffold à la Wails.
 Risks: V-JNI unproven (M1 spike first); M3 untestable locally; heavy
 environment (several GB SDK + emulator) — hence M0 decoupled.
 
-## Bundled Chromium track (opt-in CEF backend; runs last, after Phase 7 + mobile)
+## Vox browser track (optional `vox` backend; replaces the bundled Chromium track)
 
-Goal: guaranteed rendering consistency across OSes for apps that opt in.
-Stays opt-in forever: OS webview (WebView2/WebKitGTK) is the default;
-`backend: 'chromium'` (per window, in `vails.json` + `webview.Config`)
-selects the bundled engine. `vails build` keeps both flavors (lean + bundled,
-~120–200MB extra for CEF). Electron's fork is NOT used (no stable embed API,
-drags in Node — decided in the planned CEF ADR, next number 0014); CEF pinned to an upstream
-Chromium gives the same rendering without the fork patches.
+Goal: a V-written browser engine (`vlang/vox2`) as the **optional** backend
+for apps that want rendering consistency across OSes, replacing the earlier
+plan to bundle Chromium/CEF. The OS webview (WebView2/WebKitGTK) stays the
+default forever; `backend: 'vox'` (per window, in `vails.json` +
+`webview.Config`) selects the V engine. No CEF, no Node, no 120–200MB
+Chromium download — the engine is V source compiled into the same binary.
 
-- [ ] **C0 — CEF spike (gates everything)**: throwaway C99 shim over CEF
-  (`init`/`create_window`/`load_html`/`bind`/`eval`/`run_loop`, same pattern
-  as `webview_shim.h`), window + `ping→pong` through the unchanged
-  `bridge.Router` seam, DLL/`.so` + size inventory, `-gc none` check on
-  Linux. Park or delete spike code; no schema changes yet.
-- [ ] **C1 — Pure-V seam**: `webview.Config.backend` (`os_webview` default,
-   `chromium` opt-in) + `validate()` stub error until C2; `WindowConfig.backend`
-   string (`'os'` default, additive) with caller-side mapping; tests pure-V,
-   green on Windows; `CONTEXT.md` line + ADR-0014 (planned CEF decision).
-- [ ] **C2 — CEF backends behind the facade**: `cef_shim.h` + thin
-  `webview_cef_windows.c.v` / `webview_cef_linux.c.v` (`run_chromium_*`,
-  dispatched from `webview.run`); bridge protocol reused as-is
-  (`handle_message`, `resolve_js`/`to_js`); missing CEF runtime fails fast
-  with a `doctor` hint. Manual screenshot proofs on both OSes.
-- [ ] **C3 — CLI + packaging**: `doctor` probes CEF
-  (`VAILS_CEF_ROOT`/`./cef/`, version + `resources/` + subprocess helper);
-  `build [--flavor lean|bundled|both]` stages CEF next to the exe;
-  `BundleConfig` gains additive `chromium_version` (+ Electron-parity note);
-  `init` documents the `"backend": "chromium"` sample.
-- [ ] **C4 — Verify + close**: `v fmt -w .`, `v test .` green on Windows;
-  hello with `"backend": "chromium"` renders + `ping→pong` on Win/Linux;
-  lean vs bundled sizes recorded; e2e READMEs updated.
-- [ ] **C5 — the `vox` horizon. No code, on purpose.** A V-written browser
-  engine replacing Chromium is a *condition*, not a task — and **the condition
-  is not met**: no such engine was findable in the vlang org, in a GitHub
-  repository search, or on the web on 2026-09-29. C5 exists to record that,
-  and to record what happens when it is met.
+**The condition is now met.** `vlang/vox2` exists and is active (MIT, a
+real browser engine written in V + ui2, with Canvas2D, `@font-face`,
+KeyframeEffects, adblock, browser-update and packaging). This is the `vox`
+signal the old C-track (ADR-0031 §C5) was waiting for, so the Chromium/CEF
+plan (C0–C4) is **removed** and replaced by this track. C1's
+`webview.Config.backend` dispatch survives as the seam any engine lands on;
+the CEF-specific items (cef_shim.h, `VAILS_CEF_ROOT`, `chromium_version`)
+do not.
 
-**C2/C3 are marked disposable and are no longer scheduled on faith (2026-09-29).**
-C1 (`Config.backend` dispatch) is durable: it is where any future engine lands,
-and ADR-0031's native tier reuses it rather than building a rival seam. C2/C3
-are 20+ days of work that a V browser engine would **delete**. Spending six
-weeks binding Chromium and then throwing it away is the outcome this line
-exists to prevent, and the decision to spend them now waits on a `vox` signal
-rather than on enthusiasm. **A Vails app should ship against the OS webview
-(WebView2 / WebKitGTK) until one of those two things is true** — not because
-CEF is wrong, but because a bundled third engine is a bet against an
-imminent one.
+- [x] **C5 (resolved)**: the `vox` horizon is no longer a horizon —
+  `vlang/vox2` is findable and builds. Recorded here on 2026-11-10; the
+  remaining work is integration, not discovery.
+- [ ] **V0 — vox2 spike (gates everything)**: build `vox2` on Windows and
+  Linux from source; open a window; load an HTML document; round-trip
+  `ping→pong` through the unchanged `bridge.Router` seam; record the
+  binary-size delta and `-gc none` behaviour. Park or delete spike code;
+  no schema changes yet.
+- [ ] **V1 — Pure-V seam (reuse C1)**: `webview.Config.backend` gains a
+  `'vox'` value alongside `'os'`/`'chromium'` (the latter now deprecated and
+  never shipped); `WindowConfig.backend` string keeps `'os'` as default;
+  `validate()` rejects `'chromium'`; tests pure-V, green on Windows;
+  `CONTEXT.md` line + a new ADR (vox backend decision, next free number).
+- [ ] **V2 — vox backend behind the facade**: a `webview_vox_*.c.v` (or
+  pure-V adapter, since vox2 is pure V) dispatched from `webview.run`;
+  bridge protocol reused as-is (`handle_message`, `resolve_js`/`to_js`);
+  missing vox runtime fails fast with a `doctor` hint. Manual screenshot
+  proofs on both OSes.
+- [ ] **V3 — CLI + packaging**: `doctor` reports vox2 availability;
+  `build [--flavor os|vox|both]` stages nothing extra (vox is compiled in);
+  `BundleConfig` gains additive `vox_version`; `init` documents the
+  `"backend": "vox"` sample.
+- [ ] **V4 — Verify + close**: `v fmt -w .`, `v test .` green on Windows;
+  hello with `"backend": "vox"` renders + `ping→pong` on Win/Linux;
+  size comparison (os vs vox) recorded; e2e READMEs updated.
+- [ ] **V5 — ui2 alignment**: vox2 is built on `ui2`; reconcile with
+  ADR-0031's native tier so a `vox` app and a `ui2` app share one
+  rendering story rather than two. Depends on N0–N2 (ui2 spike).
 
-Order: C0 → C1 → C2 → C3 → C4, after all phases/tracks above.
-Each item: code + tests on both OSes + short ADR update + checkbox.
+**Why vox and not CEF.** vox2 is pure V, so it compiles into the same
+binary with no second toolchain, no DLL staging, and no 100MB+ download;
+the rendering engine is auditable V source rather than a pinned Chromium
+tarball; and the work that C2/C3 would have spent binding CEF (20+ days)
+is spent on a V engine that can be fixed in-tree. The cost is that vox2 is
+young (created 2026-10, browser-engine scope) and unproven on this machine
+— V0 exists to measure that before any seam is cut.
+
+Order: V0 → V1 → V2 → V3 → V4, after Phase 7 + mobile (unchanged);
+V5 after N0–N2. Each item: code + tests on both OSes + short ADR update
++ checkbox.
 
 ## Window chrome track (ADR-0021 — W0a shipped 2026-09-30, rest planned)
 
@@ -1499,9 +1506,11 @@ priority table above.
 
 ### The findings that shaped them
 
-- **`ui2` is three weeks old.** `vlang/ui2`: MIT, 62 stars, created
-  2026-09-05, last pushed 2026-09-26 — and **not in this V installation's
-  `vlib`**, so it arrives via VPM. Meanwhile the compiler half *is* present:
+- **`ui2` is roughly two months old and moving fast.** `vlang/ui2`: MIT, 75
+  stars, created 2026-09-05, last pushed 2026-11-09 — and **not in this V
+  installation's `vlib`**, so it arrives via VPM. Since then it gained a
+  stylesheet engine, animations, VML and component styling. Meanwhile the
+  compiler half *is* present:
   `v.exe` contains `vml`, `ui2`, `Screen`, `Repeater`, `on_tap` and
   `bind.text`, and `doc/docs.md` documents `$vml` in a section of its own. The
   split is real, and it is why N0 starts by *installing* rather than writing.
