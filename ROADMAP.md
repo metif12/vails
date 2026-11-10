@@ -900,7 +900,7 @@ this repo proves in.
   the injected runtime, **one contract on both platforms with no rectangle
   synchronisation**; a native `WM_NCHITTEST` + registered-rects version is
   the recorded upgrade path, not v1.
-- [ ] **W3 — the `window` service** and the title-bar buttons: minimise,
+- [ ] **W3 — the `window` service** and the title-bar buttons: minimise, (positioner pure helper landed as `positioner/`)
   maximise/unmaximise/toggle, close, `is_maximised`, centre, `set_size`,
   `set_position`, `set_fullscreen`, plus events `window:resized` /
   `window:moved` / `window:maximised` / `window:closed`. Capability-gated, so
@@ -1121,7 +1121,7 @@ away — and until that milestone lands, the honest answer stays
   coexists with the job wakeup on one HWND. **This is the same work as track
   W's W0** (ADR-0021) — one seam, three dependents (`tray`, `window`,
   `updater`).
-- [ ] **U1 — the pure-V core** (no I/O, no network, so the bulk of the work
+- [x] **U1 — the pure-V core** (no I/O, no network, so the bulk of the work
   is Windows-green without a backend): `updater_version.v` (SemVer 2.0.0
   including prerelease precedence), `updater_manifest.v` (the open manifest
   protocol + `platform_key()` + the GOOS/GOARCH alias table +
