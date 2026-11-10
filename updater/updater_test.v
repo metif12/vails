@@ -5,7 +5,10 @@ fn test_parse_version() {
 	assert v.major == 1 && v.minor == 2 && v.patch == 3 && v.pre == ''
 	v2 := parse_version('v2.0.0-rc1')!
 	assert v2.major == 2 && v2.pre == 'rc1'
-	parse_version('1.2') or { assert true; return }
+	parse_version('1.2') or {
+		assert true
+		return
+	}
 	assert false
 }
 
