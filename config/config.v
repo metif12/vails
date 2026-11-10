@@ -18,6 +18,10 @@ pub mut:
 	title  string = 'Vails App'
 	width  int    = 1024
 	height int    = 768
+	// window chrome mode: "native" (OS title bar) or "frameless" (app draws
+	// its own). "frameless" needs the W1/W2 native backends; until they ship,
+	// "frameless" is accepted by config but refused by webview.validate().
+	chrome string = 'native'
 }
 
 // CapabilitySpec mirrors capabilities.Capability for JSON decoding.
@@ -198,6 +202,9 @@ pub fn (c VailsConfig) validate() ! {
 		}
 		if w.width <= 0 || w.height <= 0 {
 			return error('vails.json: window "' + w.label + '" size must be positive')
+		}
+		if w.chrome != '' && w.chrome != 'native' && w.chrome != 'frameless' {
+			return error('vails.json: window "' + w.label + '" chrome must be "native" or "frameless", got "' + w.chrome + '"')
 		}
 	}
 	for spec in c.capabilities {

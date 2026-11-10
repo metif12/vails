@@ -49,6 +49,12 @@ pub mut:
 	// across windows has to wait for the count it needs. That is the
 	// `created`/`ready` lifecycle being honest rather than surprising.
 	on_window ?fn (w &Window)
+	// chrome selects the window's chrome mode: "native" (OS title bar, the
+	// default and the only mode with a working backend today) or "frameless"
+	// (app draws its own title bar). "frameless" is plumbed through config and
+	// validated here, but the native backends (W1/W2) are not implemented yet,
+	// so a "frameless" config is refused at runtime until they land.
+	chrome string = 'native'
 }
 
 // document returns the HTML to load, with the default CSP injected
@@ -73,6 +79,15 @@ pub fn (cfg Config) validate() ! {
 	}
 	if cfg.width <= 0 || cfg.height <= 0 {
 		return error('vails: window size must be positive')
+	}
+	if cfg.chrome != '' && cfg.chrome != 'native' && cfg.chrome != 'frameless' {
+		return error('vails: window chrome must be "native" or "frameless", got "' +
+			cfg.chrome + '"')
+	}
+	// "frameless" is accepted by config but has no backend yet (W1/W2).
+	if cfg.chrome == 'frameless' {
+		return error('vails: "frameless" chrome is not implemented yet ' +
+			'(W1 on Windows, W2 on Linux)')
 	}
 }
 
