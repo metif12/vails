@@ -55,6 +55,11 @@ pub mut:
 	// validated here, but the native backends (W1/W2) are not implemented yet,
 	// so a "frameless" config is refused at runtime until they land.
 	chrome string = 'native'
+	// backend selects the rendering engine: "os" (the default, WebView2 /
+	// WebKitGTK), "vox" (vlang/vox2, pending the V0 spike) or the deprecated
+	// "chromium" (never shipped). "vox"/"chromium" are refused at runtime
+	// until their backends land.
+	backend string = 'os'
 }
 
 // document returns the HTML to load, with the default CSP injected
@@ -88,6 +93,14 @@ pub fn (cfg Config) validate() ! {
 	if cfg.chrome == 'frameless' {
 		return error('vails: "frameless" chrome is not implemented yet ' +
 			'(W1 on Windows, W2 on Linux)')
+	}
+	if cfg.backend != '' && cfg.backend != 'os' && cfg.backend != 'vox' && cfg.backend != 'chromium' {
+		return error('vails: window backend must be "os", "vox" or "chromium", got "' +
+			cfg.backend + '"')
+	}
+	if cfg.backend == 'vox' || cfg.backend == 'chromium' {
+		return error('vails: backend "' + cfg.backend +
+			'" is not implemented yet (see the Vox browser track)')
 	}
 }
 

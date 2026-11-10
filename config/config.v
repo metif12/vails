@@ -22,6 +22,11 @@ pub mut:
 	// its own). "frameless" needs the W1/W2 native backends; until they ship,
 	// "frameless" is accepted by config but refused by webview.validate().
 	chrome string = 'native'
+	// rendering backend: "os" (WebView2/WebKitGTK, the default and only
+	// working one today), "vox" (vlang/vox2, V-written, pending V0 spike) or
+	// the deprecated "chromium" (never shipped). "vox"/"chromium" are accepted
+	// by config and refused at runtime until their backends land.
+	backend string = 'os'
 }
 
 // CapabilitySpec mirrors capabilities.Capability for JSON decoding.
@@ -205,6 +210,9 @@ pub fn (c VailsConfig) validate() ! {
 		}
 		if w.chrome != '' && w.chrome != 'native' && w.chrome != 'frameless' {
 			return error('vails.json: window "' + w.label + '" chrome must be "native" or "frameless", got "' + w.chrome + '"')
+		}
+		if w.backend != '' && w.backend != 'os' && w.backend != 'vox' && w.backend != 'chromium' {
+			return error('vails.json: window "' + w.label + '" backend must be "os", "vox" or "chromium", got "' + w.backend + '"')
 		}
 	}
 	for spec in c.capabilities {
