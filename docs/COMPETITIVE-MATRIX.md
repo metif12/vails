@@ -36,24 +36,24 @@ either small, already in S2, or deliberately out of scope.
 
 | Capability | Wails | Tauri | Vails today | Planned |
 |---|---|---|---|---|
-| **drag & drop (files, text, images)** | `drag-n-drop` | `drag` | `drop` - `WM_DROPFILES`, **Windows only, unobserved**; the page gets `drop:files`, **not** the DOM's drop events | Linux `GtkDropTarget` (ADR-0036) |
-| **multi-window / multi-webview** | `multiwindow` | `multiwindow`, `multiwebview` | routing + registry **proven**; the second Windows window is **written, unobserved** | **F0** (ADR-0035) |
-| frameless window / custom title bar | `frameless` | drag decorator + config | `webview.Config` has no chrome field | W1–W4 (ADR-0021) |
+| **drag & drop (files, text, images)** | `drag-n-drop` | `drag` | `drop` - `WM_DROPFILES` (Windows) + `gtk_drag_dest_set` (Linux, compiled 2026-10-10); **human drop unobserved on both**; the page gets `drop:files`, **not** the DOM's drop events | human proof (F1) |
+| **multi-window / multi-webview** | `multiwindow` | `multiwindow`, `multiwebview` | routing + registry **proven**; two-window run **proven on Windows 2026-10-04** (ADR-0035) — close-first-window hang still open | F0 teardown fix |
+| frameless window / custom title bar | `frameless` | drag decorator + config | `Config.chrome` + `WindowConfig.chrome` plumbed and validated (`native` works, `frameless` refused at runtime); `positioner/` center/clamp landed | W1–W4 native (ADR-0021) |
 | native popup menu | `menu`, `contextmenus` | `menu` plugin | `menu.popup` — no right-click trigger yet | `menu.set_menu`, S1 wave 4 |
 | tray | 6 examples (`systray-*`) | — | `tray` + `tray.set_menu` (ADR-0017/0026) | `window-state`, `positioner` |
 | dialogs | `dialogs`, `dialogs-basic` | `dialog` plugin | `dialog`, E2E-proven on both platforms (ADR-0027) | non-blocking dialogs |
 | notifications | `notifications`, `notch-notification` | `notification` plugin | `notification`, real WinRT toast (ADR-0018) | Linux half, Phase 5b |
 | clipboard | `clipboard` | `clipboard-manager` | `clipboard` (E2E both OSes) | — |
 | open a URL / path | — | `opener` plugin | `opener` with a scheme allowlist (ADR-0015) | `with` override |
-| self-update | `updater` | `updater` plugin | — | U1–U7 (ADR-0020) |
+| self-update | `updater` | `updater` plugin | `updater/` pure core landed (SemVer compare, channel gating, `pick_best`); providers/swap/proof open | U2–U7 (ADR-0020) |
 | single instance | `single-instance`, `single-instance-url-scheme` | `single-instance` | — | S2 |
 | autostart at login | `autostart` | `autostart` plugin | — | S2 |
 | global shortcut | `global-shortcuts` | `global-shortcut` plugin | — | S2 (Wayland risk) |
 | file association / deep link | `file-association`, `custom-protocol-example` | `file-associations`, `deep-link` | `opener` with an allowlist, the other direction | S2 |
 | keychain / secrets | — | `stronghold` plugin | — | S2 `keychain`; `stronghold` out of scope |
-| persisted key-value store | — | `store` plugin | `state.Store` is **in-memory only** | S2 `store` |
+| persisted key-value store | — | `store` plugin | `store/` landed (JSON file, atomic save); engines + service open | D2/D3 |
 | scoped filesystem | — | `fs` plugin + scope | capability-scoped asset reads only | S2, last, riskiest |
-| window size / position memory | `window-api` | `window-state` plugin | — | W4 |
+| window size / position memory | `window-api` | `window-state` plugin | `windowstate/` + `positioner/` pure halves landed; service + debounce open | W3/W4 |
 | screen / monitor enumeration | `screen` | `Window` API | — | arrives with the `window` service (W3) |
 | print | `print` | `print` plugin | — | not planned (small) |
 | dock / taskbar badge | `badge`, `badge-custom`, `dock` | — | — | not planned (small) |

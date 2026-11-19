@@ -465,6 +465,30 @@ to stay consistent across sessions.
   `handle_message_from` return `forbidden: …` (not `unknown method`) on
   deny; `assets.Server.allowed_roots` (empty = legacy root-only) scopes
   file reads. See ADR-0007.
+- **Durable store (`store.Store`, D1)**: string KV persisted as one JSON
+  file, atomic temp-write + rename. `open` (missing = empty, malformed =
+  error), `set`/`get`/`has`/`delete`, `save` flushes. In-memory
+  `state.AppState` and durable `store` are different lifecycles (ADR-0030).
+- **Updater core (`updater`, U1)**: pure decision — `parse_version`
+  (SemVer incl. `v`-prefix + prerelease), `compare`, `channel_from_string`,
+  `should_update` (beta follows beta+stable, stable follows stable only),
+  `pick_best` newest eligible. No I/O, no network; providers/swap/proof are
+  U2–U7.
+- **Window chrome + backend seam (`config.WindowConfig.chrome/backend`,
+  `webview.Config.chrome/backend`, W0b/V1)**: `"native"` (default, only
+  working backend) vs `"frameless"` (validated, refused at runtime until
+  W1/W2); `"os"` (WebView2/WebKitGTK) vs `"vox"` (pending V0 spike) vs
+  deprecated `"chromium"` (never shipped, refused). Accepted by config,
+  refused by `webview.validate()` until the backend lands.
+- **Positioner (`positioner`, W3-partial)**: pure arithmetic, screen as
+  input — `center(screen, win)`, `clamp(screen, win, p)`. The native
+  "get the screen size" call lives in the future window service.
+- **Window geometry (`windowstate`, W4-partial)**: `WindowGeometry`
+  load/save via `store.Store` (`window.*` keys, `recorded` distinguishes
+  first-run). No debounce timer, no thread — the service layer owns that.
+- **Schedule (`schedule`, Phase-7-partial)**: pure time-window evaluator —
+  `in_window` (midnight wrap supported), `active`, `most_restrictive`.
+  Clock is an input (`day/hour/minute`), so every rule is table-testable.
 
 ## Non-goals (explicit)
 

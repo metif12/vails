@@ -1,21 +1,23 @@
 # Docs Site Plan — Vails intro + documentation (Phase 7)
 
-> Status: **planned, not built**. This file holds the plan and whatever
-> information the build will need; not a line of the site exists yet, and
-> `docs/site/` contains only this file.
+> Status: **spike landed, site not published**. `docs/site/veb_site.v`
+> (export + preview + 404) exists and `docs.yml` has had its first green
+> build run; Pages deployment still needs a maintainer to enable Pages and
+> push to `main` — see `CHANGELOG.md` Unreleased/docs-site entries.
 > Locked decisions: site content is **English LTR**, output is a **static export
 > (GitHub Pages)**, v1 scope is the **full docs** (not a cut-down MVP), and
 > publishing is **automatic from CI** (§7).
 
-> **History of this file (2026-10-04).** It was Persian until this revision,
+> **History of this file (2026-10-04, updated 2026-11-19).** It was Persian until the 2026-10-04 revision,
 > which was the only non-English document in the repository — everything else
 > (README, ROADMAP, CHANGELOG, AGENTS.md, every ADR) is English, and a docs
 > site about an English-language framework should not be the one document that
 > is not. Translating it also fixed three defects the previous version had: it
 > said the build starts "after all phases/tracks are done", a condition that can
 > never be met (§1); its ADR range read `0001–0011` when 37 files exist up to
-> `0039` (§4); and it said `dist/` goes to GitHub Pages without saying **what
-> carries it there** (§7, newly added).
+> `0039` (§4 — re-count before quoting; ADRs now reach `0039` with gaps); and it said `dist/` goes to GitHub Pages without saying **what
+> carries it there** (§7, newly added). 2026-11-19: status flipped to
+> spike-landed (the "not a line exists" line expired when `veb_site.v` landed).
 
 ## 1. Entry criteria
 
@@ -211,8 +213,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-v@v2
-        with: { version: 'v0.5.2' }
+      # NOTE 2026-11-19: `oven-sh/setup-v` no longer exists (see CHANGELOG
+      # docs.yml entries — the repo pins the V release asset by SHA-256
+      # instead). The snippet below is the shape, not the exact action:
+      # install a released V (site is pure V, no `json2`, so it builds on a
+      # release, unlike the framework itself which needs master), then:
       - run: v -prod run docs/site -- --export     # writes dist/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -239,17 +244,14 @@ jobs:
    does not, that capability behaves differently on Pages than it did in preview.
    **Both must be produced.**
 
-### What is still unproven
+### What is still unproven (updated 2026-11-19)
 
-None of this has been run. `ci.yml` in this repository still has **no green job**
-(ROADMAP records B2+B3 as "executed, fixed, unproven"), so "Pages deploys it" is
-a claim only a real run can falsify. The right order: add `docs.yml`, then
-**push to `main` for real and read the output**, then write one line in
-`ROADMAP.md` saying what happened.
-
-`veb` itself is unproven too: `handle_static` and `--export` have **never been
-compiled** in this repository on V 0.5.2 (old §7, risk one). A ten-line spike
-before anything else.
+`docs.yml` build has had its first green run (8/8 build steps incl.
+`upload-pages-artifact`; `deploy` skipped on PR by design — it deploys on
+push to `main`, which needs Pages enabled, a maintainer action). The
+`veb` spike landed: `veb_site.v` exports `dist/index.html` + `404.html`
+and previews them. What is still unproven: the real Pages deployment
+(push to `main` with Pages on) and porting §4 content beyond Home+404.
 
 ## 8. Risks
 

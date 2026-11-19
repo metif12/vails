@@ -18,6 +18,26 @@ Conventions for this file:
 
 ## [Unreleased]
 
+### Added
+- **Pure-V seams for later tracks landed early (native halves still gated).**
+  `store/` (D1: durable string KV, JSON file, atomic temp-write + rename),
+  `updater/` core (U1: `parse_version`, `compare`, channel gating,
+  `pick_best`), `config` + `webview` `chrome` (W0b) and `backend` (V1)
+  plumbing with validation, `positioner/` (W3-partial: center + clamp),
+  `windowstate/` (W4-partial: geometry load/save via `store`), `schedule/`
+  (Phase-7-partial: time-window evaluator with midnight wrap). Each with
+  `_test.v`, green with the suite. No native code, no service, no proof —
+  the track checkboxes that need a backend stay unchecked on purpose.
+  Suite is 51 test files on disk (2026-11-19).
+- **Docs resync 2026-11-19.** `ROADMAP.md` "Where we are" re-dated, counts
+  45 → 51, new-modules row added, W/U/D/V rows marked partial-landed;
+  `README.md` status + layout table cover the new modules and S2-next;
+  `CONTEXT.md` gains `store`, `updater`, chrome/backend seam, `positioner`,
+  `windowstate`, `schedule`; `COMPETITIVE-MATRIX.md` flips chrome/store/
+  updater/multi-window rows from plan to partial/done with the reason;
+  `docs/site/PLAN.md` status flips planned → spike-landed and the dead
+  `oven-sh/setup-v` snippet is annotated (repo pins the V asset by SHA-256).
+
 ### Changed
 - **Phase 5's S1 catalog and its Linux backends are closed as code**, with the
   wording chosen so the closure cannot be over-read. The parent box, S1 core

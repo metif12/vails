@@ -9,13 +9,15 @@ binary, direct C interop with zero COM code on our side).
 
 > Status: Phases 0–4 E2E ✅ on **Windows** (Edge/WebView2) and **Linux**
 > (WebKitGTK) — screenshots in `tests/e2e_windows/` and
-> `tests/e2e_linux/`. Phase 5 S1 waves 1–3 are shipped
-> (ADR-0014/0015/0017): the `dialog`, `os-info`, `clipboard`, `opener`,
+> `tests/e2e_linux/`. Phase 5 S1 waves 1–4 + 5b closed as code
+> (ADR-0014/0015/0017/0023/0026/0027): the `dialog`, `os-info`, `clipboard`, `opener`,
 > `notification`, `menu` and `tray` services with real Windows backends
 > (including the window host seam, the first OS-initiated events in Vails),
-> Linux backends for `clipboard` + `opener` + `menu` + `tray`, the
+> Linux backends for `clipboard` + `opener` + `menu` + `tray` + `dialog`, the
 > grant-driven `.d.ts`, and `vails doctor` reporting which backends are
-> native here. macOS comes in Phase 6, mobile is planned (see ROADMAP).
+> native here. Pure-V seams for later tracks landed early (`store`, `updater`
+> core, `positioner`, `windowstate`, `schedule`, `chrome`/`backend` plumbing).
+> S2 is next. macOS comes in Phase 6, mobile is planned (see ROADMAP).
 
 ## Ideas & features
 
@@ -60,11 +62,16 @@ choice arrives as an event, never as the command's result) and
   by the E2E script's `PostMessage` → subclass → `tray:clicked` check, which is
   in `tests/e2e_windows/README.md` - no screenshot of it is committed, though an
   earlier version of this line cited one)
-- `v test .` green on **Windows and Linux**, **44 test files each** (measured
-  2026-10-05; the Linux run was the first this project ever had, and it is what
-  found three real cross-platform defects - see `ROADMAP.md`)
+- `v test .` green on **Windows and Linux**, **51 test files** on disk
+  (2026-11-19; was 44/44 on 2026-10-05 — the first Linux run ever, which
+  found three real cross-platform defects - see `ROADMAP.md`). CI is the
+  authority; counts move as pure-V seams land.
 - Landed since: the window menu bar (`menu.set_menu`, ADR-0023), the tray menu
-  (`tray.set_menu`, ADR-0026) and the GTK `dialog` (ADR-0027)
+  (`tray.set_menu`, ADR-0026) and the GTK `dialog` (ADR-0027) — plus the
+  pure-V halves `store/` (D1), `updater/` core (U1), `chrome` W0b + `backend`
+  V1 plumbing, `positioner/` (W3-partial), `windowstate/` (W4-partial) and
+  `schedule/` (Phase-7-partial). Native halves and proofs stay gated — see
+  `ROADMAP.md` "Where we are".
 - **The build track landed 2026-09-29 (ADR-0034)**: `vails build` produces a
   binary that *starts* (it stages the five side-by-side DLLs that used to be
   only a README comment), `--version` stamps it, a `Dockerfile` + a first
@@ -72,8 +79,8 @@ choice arrives as an event, never as the command's result) and
   `vails.lock`, and the `sql` security policy is code (`sqlreg`) rather than
   prose. Six corrections came out of it, four of which are in `AGENTS.md` §2b
   because they will bite the next contributor.
-- Planned next: `notification` on Linux, then `post_to_main` (U0/W0) — see
-  ROADMAP.md
+- Planned next: S2 system services (`single-instance` first), then W1–W4
+  native halves — see ROADMAP.md priority table
 
 ## Comparison
 
@@ -110,6 +117,11 @@ choice arrives as an event, never as the command's result) and
 | `buildplan/` | What `vails build` runs and stages, as a value — flags, output name, the five side-by-side DLLs — with the target as an argument so a Linux recipe is asserted on a Windows run (B1 ✅, ADR-0034) |
 | `deps/` | The `dependencies` block + `vails.lock`: Vails declares and reports, VPM resolves (B5 ✅, ADR-0034) |
 | `sqlreg/` | The `sql` security policy as code: a page names a query, V owns the statement (D0 ✅, ADR-0034) |
+| `store/` | Durable string KV, JSON file, atomic save (D1 ✅ pure-V; engines D2/D3 planned) |
+| `updater/` | Self-update decision core: SemVer compare, channel gating, `pick_best` (U1 ✅ pure-V; providers/swap/proof U2–U7 planned) |
+| `positioner/` | Pure-V window centering + clamping, screen as input (W3-partial) |
+| `windowstate/` | Window geometry load/save via `store` (W4-partial; debounce + service planned) |
+| `schedule/` | Pure-V time-window rule evaluator (Phase-7-partial) |
 | `mobile/` | Mobile entry + no-op stubs (planned, M0) |
 | `cli/` | `vails init/run/build/doctor/dts/deps` |
 | `examples/hello/` | Minimal app (window + ping button) |
@@ -207,7 +219,7 @@ the tests:**
 
 ```powershell
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
-v -cc gcc test .    # 45 test files, `webview` included
+v -cc gcc test .    # 51 test files on disk (2026-11-19), `webview` included
 ```
 
 The **reason** that flag is worth knowing: `dev/` imports `net.http`, V's
@@ -221,7 +233,7 @@ ADR-0034 and `AGENTS.md` §1.
 *version-scoped*, not because they are wrong: on the V master build this project
 now requires (§1b of `AGENTS.md` — no released V can build it), `v -cc gcc test .`
 and the CLI both link clean with no `-ldflags` and no `-cflags`, measured across
-all 44 test files. If a build ever fails with `undefined reference to
+all test files on disk (51 on 2026-11-19; 44 at the time this was written). If a build ever fails with `undefined reference to
 __imp_connect` or `__WSAFDIsSet`, add `-ldflags "-lws2_32"` back rather than
 hunting: `buildplan.cli_flags` still emits it precisely so that this stays a
 version difference and not a mystery.
@@ -467,7 +479,7 @@ v test .          # must be green on Windows AND on Linux
 Linux (WSL Ubuntu, the `v` there is not on `PATH`):
 
 ```sh
-wsl -d Ubuntu -- /root/vsrc/v test .        # 45/45 as of 2026-10-05
+wsl -d Ubuntu -- /root/vsrc/v test .        # 45/45 as of 2026-10-05; 51 files on disk 2026-11-19, CI is the authority
 wsl -d Ubuntu -- /root/vsrc/v -gc none -o services ./examples/services
 ```
 

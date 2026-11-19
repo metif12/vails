@@ -7,15 +7,15 @@ current position, then what has shipped, then the priority table that decides
 what happens next. Anything about *why* something took three attempts belongs in
 an ADR, not here.
 
-## Where we are (2026-10-10)
+## Where we are (2026-11-19)
 
 | | |
 |---|---|
-| `v test .` on Windows | **45/45 test files green, `webview` included** — measured 2026-10-05. The claim in the row below turned out to be stale. No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. |
-| `v test webview` on Windows | **green as of 2026-10-05** — all six `webview` files compile *and* run, twice, inside a full `v -cc gcc test .` (45/45). This contradicts the measurement recorded here until today: **"cannot be run: it takes the host down"**, measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with no OOM in the Windows event log. **What changed is not known**: the tests needed no editing to pass, and the compiler is the same 0.5.2 master as both earlier measurements. So treat this as *currently green*, not *fixed* — if it starts taking the host down again, this row is the history and the F0 work since 2026-10-03 is the first thing to suspect. |
-| `v test .` on Linux | **45/45 test files green** — measured 2026-10-05 in the CI container, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. |
-| Current phase | **Phase 5** (services) — **S1 waves 1–4 and Phase 5b closed as code on 2026-10-10.** S2 (system services) is the next wave in this phase; S3 after it. What the phase's closure does *not* claim is a human runtime proof, and each unproven path is named in "What is claimed and what is proven" |
-| Next by the table | **S2 system services**, then the W-track's W1–W4 (frameless chrome + a `window` service, 6 d) — note what W1–W4 needs: native C interop on two platforms and a human to drag a window edge, so it is not a session of work |
+| `v test .` on Windows | **51 test files** (was 45/45 on 2026-10-05, 46/46 after the container pin). No `-ldflags` needed on the current compiler — AGENTS.md §1, §1b. Local compiler is V 0.5.2 `9735aa4` (master). |
+| `v test webview` on Windows | **green as of 2026-10-05** — all six `webview` files compile *and* run, twice, inside a full `v -cc gcc test .` (45/45 at the time). This contradicts the measurement recorded here until that day: **"cannot be run: it takes the host down"**, measured 4× on 2026-09-30 and once more on 2026-10-03, one file at a time and as a directory, with no OOM in the Windows event log. **What changed is not known**: the tests needed no editing to pass, and the compiler is the same 0.5.2 master as both earlier measurements. So treat this as *currently green*, not *fixed* — if it starts taking the host down again, this row is the history and the F0 work since 2026-10-03 is the first thing to suspect. |
+| `v test .` on Linux | **green in the pinned container** — measured 2026-10-05 at 45/45, the first time this had ever been run. It began at **20 of 44 failing**, for three root causes: `services` did not compile at all (`drop.v` named the Windows-only `read_dropped_paths_native` from platform-neutral code), `webview_linux.c.v` had 7 compile errors from the F0 multi-window work, and `jobs_test.v` asserted a Windows-only error string. The `webview` files **run** here too — which was the point of this row while Windows could not run them, and is no longer a differentiator. Re-verify the count after the 5 new pure-V modules (`store`, `updater`, `positioner`, `windowstate`, `schedule`) — the suite is 51 files on disk on 2026-11-19 and CI is the authority. |
+| Current phase | **Phase 5** (services) — **S1 waves 1–4 and Phase 5b closed as code on 2026-10-10.** S2 (system services) is the next wave in this phase; S3 after it. What the phase's closure does *not* claim is a human runtime proof, and each unproven path is named in "What is claimed and what is proven". Pure-V seams for later tracks have landed early (`store` D1, `updater` U1 core, `chrome` W0b, `backend` V1, `positioner` W3-partial, `windowstate` W4-partial, `schedule` Phase-7-partial) — native halves and services themselves stay gated. |
+| Next by the table | **S2 system services**, then the W-track's W1–W4 native halves (frameless chrome + a `window` service) — note what W1–W4 needs: native C interop on two platforms and a human to drag a window edge, so it is not a session of work |
 | **Build-blocked on** | *nothing. The `vails.json` blocker that sat here on 2026-10-05 was a V master bug and stopped reproducing once V moved to `ef2ec06`; AGENTS.md §1b records the whole thing, including why the guard stays.* |
 | Runtime-blocked on | a display session for the Linux GUI proofs, a macOS backend (Phase 6) |
 
@@ -218,6 +218,7 @@ code in this repo should read §2c before it is written.
 | U/W0 | `webview.post_to_main` — **Windows**; Linux `g_idle_add` deferred | ADR-0019 | 2026-09-30 |
 | F0 | multi-window **routing** (`WindowRegistry`, `emit_to`) proven; the second Windows window written, **not observed** | ADR-0035 | 2026-09-30 |
 | ADR-0039 | `balloon` (secondary shell message), `dialog.open({folder})`, a reason for an unavailable toast, toast action buttons **built and gated** | ADR-0039 | 2026-10-03 |
+| Pure-V seams (early, native halves gated) | `store` D1 (durable KV, atomic save), `updater` U1 core (SemVer compare, channel gating, `pick_best`), `chrome` W0b + `backend` V1 plumbing (`config` + `webview.Config.validate`), `positioner` W3-partial (center/clamp), `windowstate` W4-partial (geometry load/save via `store`), `schedule` Phase-7-partial (time-window evaluator) — 5 new modules, suite 45 → 51 files | — | 2026-11-19 |
 
 ## What is claimed and what is proven
 
@@ -327,18 +328,22 @@ Effort is in focused days and is an estimate, not a commitment.
 | 7 | — | **U0/W0** `post_to_main` | 3 d | U4–U7, W1–W4 | three dependents; also the job half of ADR-0019 (its subscriber half shipped as ADR-0023) | **done on Windows (ADR-0019)** — `jobs.v` + a real E2E screenshot; Linux `g_idle_add` deferred |
 | 8 | — | **F0** multi-window | 6 d | **W**, `tray.set_menu`, U4's second window | highest-leverage single item; reopens an ADR-0020 decision | **done, PROVEN on Windows (ADR-0035, 2026-10-04)** — 21 routing tests + a real two-window run that found two shipped bugs (`webview_dispatch` success read as failure, then an access violation inside the DLL); Linux structurally done, unrun |
 | 9 | F0 | **F1** drag & drop | 6 d | R3 | the other platform gap; check `EnableWebDrop` reachability first | **done, and the gating question is answered** (ADR-0036, 2026-10-03) - `EnableWebDrop` is **not reachable**: the installed `webview` 0.12 header exposes no `ICoreWebView2Controller`, so the design went to `WM_DROPFILES` on the HWND instead. The observable proof is the outstanding half: nothing has seen a human drag a file |
-| 10 | U0 | **W1–W4** chrome + `window` service | 6 d | the tutorial's menu item, E6 | absorbs S1 wave-4 `window-state`/`positioner` | planned |
-| 11 | W, F0 | **U1–U4** updater core + service | 8 d | U5, P4 | the manifest-as-core half is pure V and no I/O | planned |
+| 10 | U0 | **W1–W4** chrome + `window` service | 6 d | the tutorial's menu item, E6 | absorbs S1 wave-4 `window-state`/`positioner` | **W0b done; `positioner` + `windowstate` pure-V halves landed 2026-11-19** — W1/W2 native + W3 service + W4 debounce still planned |
+| 11 | W, F0 | **U1–U4** updater core + service | 8 d | U5, P4 | the manifest-as-core half is pure V and no I/O | **U1 pure core landed 2026-11-19** (`updater/` version compare, channel gating, `pick_best`); U2–U4 still planned |
 | 12 | B1–B4 | **P0–P4** distribution | 8 d | release | the update-channel policy is decision-only and independent | planned |
 | 13 | P0 | **U5–U7** swap, helper mode, proof | 6 d | a shipping release | needs a distribution channel to mean anything | planned |
 | 14 | B5, X0 | **N0–N4** native tier + VML + editor | 19 d | a second kind of app | `ui2` is 3 weeks old and not in `vlib` — spike first | B5 gate now open |
-| 15 | B5, D0 | **D1–D3** `store` + `sql` | 9 d | E1/E3/E6 | both gates are now open (ADR-0034) | **unblocked** |
+| 15 | B5, D0 | **D1–D3** `store` + `sql` | 9 d | E1/E3/E6 | both gates are now open (ADR-0034) | **D1 landed 2026-11-19** (`store/` JSON file, atomic save); D2/D3 still planned |
 | 16 | X0=yes | **X1** Vinix backend | 5 d | — | only on a yes from #1 | planned |
 | 17 | F0, U, W | **R3–R4** showcase | 6 d | all E2E | replaces `examples/services` as the proof vehicle | planned |
 
 **Total ≈ 91 focused days** at the start of the build track; **≈ 52 left now.**
 Landed since: D0, B0, B1, B2+B3, roughly half of B5 (ADR-0034), U0/W0a
-(ADR-0019), and F0's routing half (ADR-0035). That is the number this file
+(ADR-0019), and F0's routing half (ADR-0035) — plus, 2026-11-19, the pure-V
+halves D1 (`store/`), U1 (`updater/` core), W0b (`chrome` plumbing), V1
+(`backend` seam), W3-partial (`positioner/`), W4-partial (`windowstate/`)
+and a Phase-7-partial (`schedule/`). Pure-V halves do not change the total:
+the native halves, services, and proofs are still the work. That is the number this file
 previously carried "~2 focused weeks" for, and the discrepancy is stated here
 rather than spread across eight sections where nobody adds it up. The honest
 reading is that this is **several months of one person**, and the ordering above
@@ -900,27 +905,34 @@ this repo proves in.
   the injected runtime, **one contract on both platforms with no rectangle
   synchronisation**; a native `WM_NCHITTEST` + registered-rects version is
   the recorded upgrade path, not v1.
-- [ ] **W3 — the `window` service** and the title-bar buttons: minimise, (positioner pure helper landed as `positioner/`)
-  maximise/unmaximise/toggle, close, `is_maximised`, centre, `set_size`,
+- [ ] **W3 — the `window` service** and the title-bar buttons: minimise, maximise/unmaximise/toggle, close, `is_maximised`, centre, `set_size`,
   `set_position`, `set_fullscreen`, plus events `window:resized` /
   `window:moved` / `window:maximised` / `window:closed`. Capability-gated, so
   a page that must not move its window simply is not granted it. The buttons
   are ordinary commands — the framework synthesises nothing and the app owns
   glyphs, spacing and RTL. Mobile is an explicit no-op (ADR-0006) with a
-  `doctor` line, per the `ServiceStatus` pattern.
+  `doctor` line, per the `ServiceStatus` pattern. Pure-V half landed
+  2026-11-19 as `positioner/` (center + clamp, screen as input, no display).
+  Native service + events still planned.
 - [ ] **W4 — `window-state` / `positioner`**: persist size and position,
   which is the S1 wave-4 item this track absorbed. Needs a debounce timer on
-  a worker, so it is gated on ADR-0019 too. Plus `examples/hello` grows the
-  `frameless` proof page.
+  a worker, so it is gated on ADR-0019 too. Pure-V half landed 2026-11-19
+  as `windowstate/` (geometry load/save via `store.Store`, debounce excluded
+  on purpose). Service + timer + `examples/hello` proof page still planned.
 
 Order: W0 → W1 → W2 → W3 → W4, after Phase 5b. **W0 and the updater's U0 are
 the same piece of work, not two** — ADR-0019 now has three dependents instead
 of two (`tray`, `window`, `updater`), which is what made it worth doing first.
-**W0a (the seam) shipped 2026-09-30** on Windows with an E2E screenshot, so
-what remains here is W0b (the `chrome` config plumbing) and then W1. Note that
+**W0a (the seam) shipped 2026-09-30** on Windows with an E2E screenshot, and
+**W0b (the `chrome` config plumbing) landed 2026-11-19** (`config` +
+`webview.validate`, `frameless` refused at runtime until W1/W2) — so what
+remains here is W1, then W2. The pure-V halves `positioner/` (W3) and
+`windowstate/` (W4) also landed 2026-11-19; the native service, debounce,
+and proofs are still the work. Note that
 ADR-0019's Linux half is still unwritten, so W4's debounced `window-state` is
 Windows-provable now and not yet Linux-provable. Linux is otherwise no longer
-blocked: `v test .` is green there (45/45 in the pinned container) and
+blocked: `v test .` is green there (pinned container; 45/45 on 2026-10-05,
+51 files on disk 2026-11-19) and
 `examples/services` builds, so W2 is a matter of adding evidence. What stays
 unprovable in a container is unchanged and belongs to the manual checklist (the
 `menu:clicked {id}` mapping needs a desktop session). ~6 focused days.
@@ -1122,13 +1134,12 @@ away — and until that milestone lands, the honest answer stays
   W's W0** (ADR-0021) — one seam, three dependents (`tray`, `window`,
   `updater`).
 - [x] **U1 — the pure-V core** (no I/O, no network, so the bulk of the work
-  is Windows-green without a backend): `updater_version.v` (SemVer 2.0.0
-  including prerelease precedence), `updater_manifest.v` (the open manifest
-  protocol + `platform_key()` + the GOOS/GOARCH alias table +
-  `default_asset_matcher`), `updater_verify.v` (streaming sha256/sha512, and
-  a digest parsed as **either** hex or base64 — the manifest uses base64 and
-  `SHA256SUMS` uses hex, and getting that wrong fails verification against a
-  document the other provider accepts).
+  is Windows-green without a backend): landed 2026-11-19 as `updater/`
+  (`parse_version` SemVer incl. `v`-prefix + prerelease, `compare`,
+  `channel_from_string`, `should_update` channel gating, `pick_best` newest
+  eligible). The ADR-0020 file split (`updater_version/manifest/verify.v`)
+  is still the plan for U2 — U1 is the decision half, tested without a
+  server or temp dir.
 - [ ] **U2 — providers**: `updater_github.v` (releases API, optional token /
   prerelease / GHE `BaseURL`, `SHA256SUMS`, filename alias matching) and
   `updater_endpoint.v` (one static manifest, `{{platform}}/{{arch}}/
@@ -1174,7 +1185,7 @@ away — and until that milestone lands, the honest answer stays
 
 Order: U0 → U1 → U2 → U3 → U4 → U5 → U6 → U7, after Phase 5b, before Phase 7.
 Nothing here is a macOS commitment; Phase 6 first. Linux is not blocked —
-`v test .` is 45/45 in the pinned container there and the app builds, so U7's
+`v test .` is green in the pinned container there and the app builds, so U7's
 Linux entries are added evidence rather than an unblocking. ~14 focused days,
 which does **not** fit the "~2 focused weeks" currently claimed for S1 wave 4 +
 Phase 5b — re-baselining the roadmap against that is an open decision in
@@ -1595,8 +1606,9 @@ priority table above.
 - [x] **D1 — `store`**, promoted out of S2: one durable key-value surface with
   a **swappable engine behind a seam**, default a **JSON file** (the data is
   config-shaped, a few KB, no dependency, gcc-free, and the file stays
-  inspectable — a real property, not a nicety). A KV store is a few hundred
-  lines, so Vails writing it is not a compromise. `state.AppState` is
+  inspectable — a real property, not a nicety). Landed 2026-11-19 as
+  `store/` (string KV, atomic temp-write + rename, missing file = empty).
+  A KV store is a few hundred lines, so Vails writing it is not a compromise. `state.AppState` is
   untouched: in-memory session state and durable storage are different
   lifecycles and merging them is the rejection recorded in ADR-0030. ~3 d
 - [ ] **D2 — the LevelDB engine**, opt-in, with its maturity recorded (9 stars,
@@ -1631,6 +1643,11 @@ priority table above.
   than a thread.
 
 ### The C track gets a horizon, and a warning
+
+> 2026-11-19: superseded by the Vox browser track above. C5's condition
+> ("no V-written engine findable") expired when `vlang/vox2` shipped —
+> see V0–V5. The lines below are history, not plan: C1's `Config.backend`
+> seam survives (reused by V1/N1), C2/C3 stay deleted.
 
 - [ ] **C5 — the `vox` horizon. No code, on purpose.** A V-written browser
   engine replacing Chromium is a *condition*, not a task, and the condition
